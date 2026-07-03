@@ -221,28 +221,35 @@ function initAudio(){
     if (muted) AC.suspend();
   } catch {}
 }
-// background music (songs/ya-marhaba), looped and routed through the context so mute covers it
-let musicEl = null;
+// background music (songs/ya-marhaba), looped through the context. The music toggle mutes
+// its GAIN rather than pausing the element: pausing triggers an iOS audio-session
+// interruption that silences the whole context (engine and effects included).
+let musicEl = null, musicGain = null;
 function startMusic(){
-  if (musicOff || musicEl || !AC) return;
+  if (musicEl || !AC) return;
   musicEl = new Audio();
   musicEl.src = musicEl.canPlayType('audio/mp4') ? 'songs/ya-marhaba.m4a' : 'songs/ya-marhaba.ogg';
   musicEl.loop = true;
   try {
     const src = AC.createMediaElementSource(musicEl);
-    const g = AC.createGain(); g.gain.value = 0.32;
-    src.connect(g); g.connect(AC.destination);
+    musicGain = AC.createGain();
+    musicGain.gain.value = musicOff ? 0 : 0.32;
+    src.connect(musicGain); musicGain.connect(AC.destination);
   } catch {}
-  musicEl.play().catch(() => { musicEl = null; });   // blocked -> retry on the next gesture
+  musicEl.play().catch(() => { musicEl = null; musicGain = null; });   // blocked -> retry next gesture
 }
-// every real gesture retries the unlock: some browsers keep a fresh context suspended
+// every real gesture retries the unlock: browsers park contexts in 'suspended' AND
+// (iOS) 'interrupted' states — resume from anything that isn't running
 const audioKick = () => {
   initAudio();
-  if (AC && !muted && AC.state === 'suspended') AC.resume();
+  if (AC && !muted && AC.state !== 'running') AC.resume();
   startMusic();
 };
 addEventListener('pointerdown', audioKick);
 addEventListener('keydown', audioKick);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && AC && !muted && AC.state !== 'running') AC.resume();
+});
 function beep(freq, dur, type = 'square', vol = 0.15, when = 0){
   if (!AC || muted) return;
   const t0 = AC.currentTime + when;
@@ -826,7 +833,7 @@ const player = makeCar(playerColor);
 scene.add(player);
 let px = -1.5, pz = 0, heading = 0, speed = 0;
 window.dbg = () => ({px, pz, heading, speed, boostT: +boostT.toFixed(2), boostCount, carsReady: !!carGeo,
-  audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicEl.paused ? ' music:paused' : ' music:playing') : ' music:off'}` : 'not started',   // console self-check: D at speed => heading down, px down
+  audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',   // console self-check: D at speed => heading down, px down
   nextRing: (() => { const b = boosters.find(b => !b.taken && b.z > pz); return b ? {x: b.x, dz: +(b.z - pz).toFixed(0)} : null; })(),
   rivals: rivals.map(r => ({x: +r.x.toFixed(2), z: +r.z.toFixed(2), cur: +r.cur.toFixed(2), rot: +r.mesh.rotation.y.toFixed(2)}))});
 
@@ -1148,8 +1155,8 @@ function toggleSound(){
 function toggleMusic(){
   musicOff = !musicOff;
   try { localStorage.musicOff = musicOff ? '1' : '0'; } catch {}
-  if (musicOff){ if (musicEl) musicEl.pause(); }
-  else { initAudio(); if (musicEl) musicEl.play().catch(() => {}); else startMusic(); }
+  if (!musicOff && !musicEl){ initAudio(); startMusic(); }
+  if (musicGain) musicGain.gain.setTargetAtTime(musicOff ? 0 : 0.32, AC.currentTime, 0.05);
   syncAudioUI();
 }
 sndBtn.addEventListener('click', toggleSound);
