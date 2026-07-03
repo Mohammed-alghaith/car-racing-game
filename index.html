@@ -27,9 +27,10 @@
   .camBtn.active{background:#2d6cdf;border-color:#fff}
   .camBtn.off{opacity:.4}
 
-  #stick{position:absolute;right:26px;bottom:26px;width:150px;height:150px;border-radius:50%;
-    background:rgba(18,20,28,.35);border:2px solid rgba(255,255,255,.3);touch-action:none}
-  #knob{position:absolute;left:50%;top:50%;width:62px;height:62px;border-radius:50%;
+  #stick{position:fixed;width:140px;height:140px;margin:-70px 0 0 -70px;border-radius:50%;
+    background:rgba(18,20,28,.35);border:2px solid rgba(255,255,255,.3);
+    display:none;pointer-events:none;z-index:2}
+  #knob{position:absolute;left:50%;top:50%;width:58px;height:58px;border-radius:50%;
     background:radial-gradient(circle at 35% 30%,#5a6070,#23262e);border:2px solid rgba(255,255,255,.45);
     transform:translate(-50%,-50%);box-shadow:0 4px 12px rgba(0,0,0,.55)}
 
@@ -90,7 +91,6 @@
   /* notched phones: keep controls inside the safe area */
   @supports (padding: env(safe-area-inset-top)){
     #camBtns{top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
-    #stick{bottom:calc(26px + env(safe-area-inset-bottom));right:calc(26px + env(safe-area-inset-right))}
     #speedBox{bottom:calc(18px + env(safe-area-inset-bottom));left:calc(16px + env(safe-area-inset-left))}
     #boostBtn{bottom:calc(36px + env(safe-area-inset-bottom))}
     #hint{bottom:calc(6px + env(safe-area-inset-bottom))}
@@ -102,7 +102,6 @@
     .camBtn b{font-size:13px}
     .camBtn span{font-size:8px}
     #camBtns{width:114px;gap:8px}
-    #stick{width:120px;height:120px}
     #knob{width:50px;height:50px}
     #boostBtn{width:54px;height:54px;font-size:21px;right:148px;bottom:26px}
     .bar{width:22px;height:6px}
@@ -130,12 +129,12 @@
     <div class="camBtn ctl" id="sndBtn2"><b>&#x1F50A;</b><span>الصوت</span></div>
     <div class="camBtn ctl" id="musicBtn2"><b>&#x1F3B5;</b><span>الموسيقى</span></div>
   </div>
-  <div id="stick" class="ctl"><div id="knob"></div></div>
+  <div id="stick"><div id="knob"></div></div>
   <div id="speedBox">
     <div id="bars"></div>
     <div id="mph">0 كم/س</div>
   </div>
-  <div id="hint">عصا التحكم: للأعلى وقود، للأسفل فرملة، جانبًا للتوجيه &nbsp;|&nbsp; لوحة المفاتيح: W/S وقود وفرملة، A/D توجيه، B تسريع، C كاميرا</div>
+  <div id="hint">المس أي مكان وحرّك إصبعك للقيادة — انقر مرتين للتسريع &nbsp;|&nbsp; لوحة المفاتيح: W/S وA/D وB للتسريع</div>
   <div id="boostBtn" class="ctl"><b>&#x1F525;</b><span id="boostCount">0</span></div>
   <div id="raceHud"><div id="pos">1/4</div><br><div id="dist">1500 م</div><br><div id="lvl"></div></div>
   <div id="banner">3</div>
@@ -155,7 +154,7 @@
     <div class="sep">&#x1F3A8; ورشة الطلاء &mdash; اختر لونًا</div>
     <div id="colors"></div>
     <div class="btnRow"><button id="sndBtn"></button><button id="musicBtn"></button></div>
-    <div id="buildTag">v3</div>
+    <div id="buildTag">v4</div>
   </div>
 </div>
 
@@ -835,6 +834,7 @@ const player = makeCar(playerColor);
 scene.add(player);
 let px = -1.5, pz = 0, heading = 0, speed = 0;
 window.dbg = () => ({px, pz, heading, speed, boostT: +boostT.toFixed(2), boostCount, carsReady: !!carGeo,
+  stick: [+stickX.toFixed(2), +stickY.toFixed(2)],
   audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',   // console self-check: D at speed => heading down, px down
   nextRing: (() => { const b = boosters.find(b => !b.taken && b.z > pz); return b ? {x: b.x, dz: +(b.z - pz).toFixed(0)} : null; })(),
   rivals: rivals.map(r => ({x: +r.x.toFixed(2), z: +r.z.toFixed(2), cur: +r.cur.toFixed(2), rot: +r.mesh.rotation.y.toFixed(2)}))});
@@ -962,36 +962,43 @@ const keys = {left:false, right:false};
 let keySteer = 0, stickX = 0, stickY = 0;
 let camMode = 'rear';
 
-// joystick: up = gas, down = brake/reverse, sideways = analog steering
+// floating joystick: touch anywhere on the road to spawn it under your finger;
+// up = gas, down = brake/reverse, sideways = analog steering. Double-tap fires the boost.
 const stickEl = document.getElementById('stick');
 const knobEl = document.getElementById('knob');
-let stickPtr = null;                    // first touch owns the stick; others are ignored
-function stickUpdate(e){
-  const r = stickEl.getBoundingClientRect();
-  const R = r.width*0.37;
-  let dx = e.clientX - (r.left + r.width/2);
-  let dy = e.clientY - (r.top + r.height/2);
-  const d = Math.hypot(dx, dy);
-  if (d > R){ dx *= R/d; dy *= R/d; }
-  stickX = dx/R;
-  stickY = -dy/R;
-  knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-}
-stickEl.addEventListener('pointerdown', e => {
-  e.preventDefault();
-  if (stickPtr !== null) return;
+const STICK_R = 52;
+let stickPtr = null, stickOX = 0, stickOY = 0;
+let lastTapT = 0, lastTapX = 0, lastTapY = 0;
+const gameCanvas = renderer.domElement;
+addEventListener('pointerdown', e => {
+  if (e.target !== gameCanvas) return;             // buttons and menus keep their own behavior
+  const t = performance.now();
+  if (t - lastTapT < 300 && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 80) fireBoost();
+  lastTapT = t; lastTapX = e.clientX; lastTapY = e.clientY;
+  if (stickPtr !== null) return;                   // first touch owns the stick
   stickPtr = e.pointerId;
-  try { stickEl.setPointerCapture(e.pointerId); } catch {}
-  stickUpdate(e);
+  stickOX = e.clientX; stickOY = e.clientY;
+  stickEl.style.left = `${stickOX}px`;
+  stickEl.style.top = `${stickOY}px`;
+  stickEl.style.display = 'block';
+  knobEl.style.transform = 'translate(-50%, -50%)';
 });
-stickEl.addEventListener('pointermove', e => { if (e.pointerId === stickPtr) stickUpdate(e); });
+addEventListener('pointermove', e => {
+  if (e.pointerId !== stickPtr) return;
+  let dx = e.clientX - stickOX, dy = e.clientY - stickOY;
+  const d = Math.hypot(dx, dy);
+  if (d > STICK_R){ dx *= STICK_R/d; dy *= STICK_R/d; }
+  stickX = dx/STICK_R;
+  stickY = -dy/STICK_R;
+  knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+});
 const stickOff = e => {
   if (e.pointerId !== stickPtr) return;
   stickPtr = null; stickX = 0; stickY = 0;
-  knobEl.style.transform = 'translate(-50%, -50%)';
+  stickEl.style.display = 'none';
 };
-stickEl.addEventListener('pointerup', stickOff);
-stickEl.addEventListener('pointercancel', stickOff);
+addEventListener('pointerup', stickOff);
+addEventListener('pointercancel', stickOff);
 
 document.querySelectorAll('.camBtn[data-mode]').forEach(b => b.addEventListener('pointerdown', () => {
   camMode = b.dataset.mode;
