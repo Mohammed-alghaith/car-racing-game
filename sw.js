@@ -1,5 +1,5 @@
 // لعبة ناصر — offline cache
-const CACHE = 'nasser-v1';
+const CACHE = 'nasser-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -27,9 +27,24 @@ self.addEventListener('activate', e => {
   );
 });
 
-// cache-first with background fill: the game keeps working with no network at all
+// the page itself is network-first (updates land immediately, cache is the offline fallback);
+// heavy static assets are cache-first with background fill
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const wantsHTML = e.request.mode === 'navigate' ||
+    (e.request.headers.get('accept') || '').includes('text/html');
+  if (wantsHTML){
+    e.respondWith(
+      fetch(e.request).then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy));
+        return res;
+      }).catch(() =>
+        caches.match(e.request, {ignoreSearch: true}).then(h => h || caches.match('./index.html'))
+      )
+    );
+    return;
+  }
   e.respondWith(
     caches.match(e.request, {ignoreSearch: true}).then(hit => hit || fetch(e.request).then(res => {
       if (res.ok && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))){

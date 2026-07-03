@@ -27,16 +27,11 @@
   .camBtn.active{background:#2d6cdf;border-color:#fff}
   .camBtn.off{opacity:.4}
 
-  #pedals{position:absolute;right:14px;top:16px;display:flex;flex-direction:column;gap:18px}
-  .pedal{width:76px;height:150px;border-radius:14px;background:linear-gradient(#f0f0ee,#c9c9c6);
-    box-shadow:0 5px 12px rgba(0,0,0,.45),inset 0 1px 0 #fff;display:flex;flex-direction:column;cursor:pointer}
-  .pedal .dots{flex:1;margin:10px 10px 4px;border-radius:6px;
-    background-image:radial-gradient(circle at 7px 7px,#96968f 4.5px,transparent 5.5px);background-size:16px 16px}
-  .pedal .lbl{font:700 12px/1.3 system-ui;color:#3a3a3a;text-align:center;padding:0 4px 8px}
-  .pedal.on{transform:scale(.94);background:linear-gradient(#d8e6d4,#aebfa9)}
-
-  #wheelBox{position:absolute;right:24px;bottom:20px;width:150px;height:150px}
-  #wheelBox svg{width:100%;height:100%;transform-origin:50% 50%;filter:drop-shadow(0 5px 8px rgba(0,0,0,.5))}
+  #stick{position:absolute;right:26px;bottom:26px;width:150px;height:150px;border-radius:50%;
+    background:rgba(18,20,28,.35);border:2px solid rgba(255,255,255,.3);touch-action:none}
+  #knob{position:absolute;left:50%;top:50%;width:62px;height:62px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#5a6070,#23262e);border:2px solid rgba(255,255,255,.45);
+    transform:translate(-50%,-50%);box-shadow:0 4px 12px rgba(0,0,0,.55)}
 
   #speedBox{position:absolute;left:16px;bottom:18px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
   #bars{display:flex;flex-direction:column-reverse;gap:3px}
@@ -94,8 +89,7 @@
   /* notched phones: keep controls inside the safe area */
   @supports (padding: env(safe-area-inset-top)){
     #camBtns{top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
-    #pedals{top:calc(16px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right))}
-    #wheelBox{bottom:calc(20px + env(safe-area-inset-bottom));right:calc(24px + env(safe-area-inset-right))}
+    #stick{bottom:calc(26px + env(safe-area-inset-bottom));right:calc(26px + env(safe-area-inset-right))}
     #speedBox{bottom:calc(18px + env(safe-area-inset-bottom));left:calc(16px + env(safe-area-inset-left))}
     #boostBtn{bottom:calc(36px + env(safe-area-inset-bottom))}
     #hint{bottom:calc(6px + env(safe-area-inset-bottom))}
@@ -107,9 +101,8 @@
     .camBtn b{font-size:13px}
     .camBtn span{font-size:8px}
     #camBtns{width:114px;gap:8px}
-    .pedal{width:60px;height:118px}
-    .pedal .lbl{font-size:10px}
-    #wheelBox{width:118px;height:118px}
+    #stick{width:120px;height:120px}
+    #knob{width:50px;height:50px}
     #boostBtn{width:54px;height:54px;font-size:21px;right:148px;bottom:26px}
     .bar{width:22px;height:6px}
     #mph{font-size:12px}
@@ -136,24 +129,12 @@
     <div class="camBtn ctl" id="sndBtn2"><b>&#x1F50A;</b><span>الصوت</span></div>
     <div class="camBtn ctl" id="musicBtn2"><b>&#x1F3B5;</b><span>الموسيقى</span></div>
   </div>
-  <div id="pedals">
-    <div class="pedal ctl" id="drive"><div class="dots"></div><div class="lbl">وقود</div></div>
-    <div class="pedal ctl" id="brake"><div class="dots"></div><div class="lbl">فرملة / رجوع</div></div>
-  </div>
-  <div id="wheelBox" class="ctl">
-    <svg id="wheelSvg" viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="43" fill="none" stroke="#141416" stroke-width="12"/>
-      <circle cx="50" cy="50" r="43" fill="none" stroke="#3c3c40" stroke-width="7"/>
-      <path d="M50 50 L8 41 M50 50 L92 41 M50 50 L50 93" stroke="#232326" stroke-width="9" stroke-linecap="round"/>
-      <circle cx="50" cy="50" r="14" fill="#4a4a4e"/>
-      <circle cx="50" cy="50" r="6.5" fill="#28282b"/>
-    </svg>
-  </div>
+  <div id="stick" class="ctl"><div id="knob"></div></div>
   <div id="speedBox">
     <div id="bars"></div>
     <div id="mph">0 كم/س</div>
   </div>
-  <div id="hint">اسحب المقود والدواسات &nbsp;|&nbsp; لوحة المفاتيح: W/S وقود وفرملة، A/D توجيه، B تسريع، C كاميرا</div>
+  <div id="hint">عصا التحكم: للأعلى وقود، للأسفل فرملة، جانبًا للتوجيه &nbsp;|&nbsp; لوحة المفاتيح: W/S وقود وفرملة، A/D توجيه، B تسريع، C كاميرا</div>
   <div id="boostBtn" class="ctl"><b>&#x1F525;</b><span id="boostCount">0</span></div>
   <div id="raceHud"><div id="pos">1/4</div><br><div id="dist">1500 م</div><br><div id="lvl"></div></div>
   <div id="banner">3</div>
@@ -969,54 +950,39 @@ player.add(flames);
 // ---------- input ----------
 const input = {drive:false, brake:false};
 const keys = {left:false, right:false};
-let wheelAngle = 0, wheelHeld = false, lastPtrAng = 0, keySteer = 0;
+let keySteer = 0, stickX = 0, stickY = 0;
 let camMode = 'rear';
 
-function bindHold(el, prop){
-  let pid = null;                       // track the owning pointer so a stray second touch can't release the hold
-  el.addEventListener('pointerdown', e => {
-    e.preventDefault();
-    pid = e.pointerId;
-    input[prop] = true; el.classList.add('on');
-    try { el.setPointerCapture(e.pointerId); } catch {}
-  });
-  const off = e => {
-    if (e.pointerId !== pid) return;
-    pid = null; input[prop] = false; el.classList.remove('on');
-  };
-  el.addEventListener('pointerup', off);
-  el.addEventListener('pointercancel', off);
+// joystick: up = gas, down = brake/reverse, sideways = analog steering
+const stickEl = document.getElementById('stick');
+const knobEl = document.getElementById('knob');
+let stickPtr = null;                    // first touch owns the stick; others are ignored
+function stickUpdate(e){
+  const r = stickEl.getBoundingClientRect();
+  const R = r.width*0.37;
+  let dx = e.clientX - (r.left + r.width/2);
+  let dy = e.clientY - (r.top + r.height/2);
+  const d = Math.hypot(dx, dy);
+  if (d > R){ dx *= R/d; dy *= R/d; }
+  stickX = dx/R;
+  stickY = -dy/R;
+  knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
 }
-bindHold(document.getElementById('drive'), 'drive');
-bindHold(document.getElementById('brake'), 'brake');
-
-const wheelBox = document.getElementById('wheelBox');
-const wheelSvg = document.getElementById('wheelSvg');
-const ptrAng = e => {
-  const r = wheelBox.getBoundingClientRect();
-  return Math.atan2(e.clientY - (r.top + r.height/2), e.clientX - (r.left + r.width/2)) * 180/Math.PI;
-};
-let wheelPtr = null;                    // first touch owns the wheel; others are ignored
-wheelBox.addEventListener('pointerdown', e => {
+stickEl.addEventListener('pointerdown', e => {
   e.preventDefault();
-  if (wheelPtr !== null) return;
-  wheelPtr = e.pointerId;
-  wheelHeld = true; lastPtrAng = ptrAng(e);
-  try { wheelBox.setPointerCapture(e.pointerId); } catch {}
+  if (stickPtr !== null) return;
+  stickPtr = e.pointerId;
+  try { stickEl.setPointerCapture(e.pointerId); } catch {}
+  stickUpdate(e);
 });
-wheelBox.addEventListener('pointermove', e => {
-  if (!wheelHeld || e.pointerId !== wheelPtr) return;
-  const a = ptrAng(e);
-  let d = a - lastPtrAng; d = ((d + 540) % 360) - 180;   // shortest arc, no ±180 jump
-  wheelAngle = clamp(wheelAngle + d, -150, 150);
-  lastPtrAng = a;
-});
-const wheelOff = e => {
-  if (e.pointerId !== wheelPtr) return;
-  wheelPtr = null; wheelHeld = false;
+stickEl.addEventListener('pointermove', e => { if (e.pointerId === stickPtr) stickUpdate(e); });
+const stickOff = e => {
+  if (e.pointerId !== stickPtr) return;
+  stickPtr = null; stickX = 0; stickY = 0;
+  knobEl.style.transform = 'translate(-50%, -50%)';
 };
-wheelBox.addEventListener('pointerup', wheelOff);
-wheelBox.addEventListener('pointercancel', wheelOff);
+stickEl.addEventListener('pointerup', stickOff);
+stickEl.addEventListener('pointercancel', stickOff);
 
 document.querySelectorAll('.camBtn[data-mode]').forEach(b => b.addEventListener('pointerdown', () => {
   camMode = b.dataset.mode;
@@ -1244,12 +1210,10 @@ function frame(now){
     return;
   }
 
-  // steering (wheel drag + keyboard blended)
+  // steering (joystick x + keyboard blended)
   const kt = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   keySteer += (kt - keySteer) * Math.min(1, 6*dt);
-  if (!wheelHeld) wheelAngle -= wheelAngle * Math.min(1, 8*dt);
-  const steer = clamp(wheelAngle/150 + keySteer, -1, 1);
-  wheelSvg.style.transform = `rotate(${steer*150}deg)`;
+  const steer = clamp(stickX + keySteer, -1, 1);
 
   // race clock: countdown locks inputs, then GO
   raceT += dt;
@@ -1259,8 +1223,8 @@ function frame(now){
     bannerEl.textContent = cnt > 0 ? cnt : 'انطلق!';
     if (cnt !== lastCnt){ lastCnt = cnt; beep(cnt > 0 ? 440 : 880, cnt > 0 ? 0.12 : 0.4, 'square', 0.15); }
   } else bannerEl.style.display = 'none';
-  const drv = input.drive && raceT >= 0 && !finished;
-  const brk = input.brake && raceT >= 0 && !finished;
+  const drv = (input.drive || stickY > 0.2) && raceT >= 0 && !finished;
+  const brk = (input.brake || stickY < -0.25) && raceT >= 0 && !finished;
 
   // longitudinal — ponytail: arcadey point-mass, no tire model
   if (brk){
