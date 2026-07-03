@@ -1,5 +1,5 @@
 // لعبة ناصر — offline cache
-const CACHE = 'nasser-v2';
+const CACHE = 'nasser-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -7,12 +7,12 @@ const ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './Reference/back.png',
-  './Reference/front.png',
-  './Reference/side.png',
+  './cyberpunk_car.glb',
   './songs/ya-marhaba.m4a',
   './songs/ya-marhaba.ogg',
   'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js',
+  'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js',
+  'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js',
 ];
 
 self.addEventListener('install', e => {

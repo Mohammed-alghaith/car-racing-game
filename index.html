@@ -154,15 +154,20 @@
     <div class="sep">&#x1F3A8; ورشة الطلاء &mdash; اختر لونًا</div>
     <div id="colors"></div>
     <div class="btnRow"><button id="sndBtn"></button><button id="musicBtn"></button></div>
-    <div id="buildTag">v4</div>
+    <div id="buildTag">v5 · Cyberpunk car by 4d_Bob (CC BY)</div>
   </div>
 </div>
 
 <script type="importmap">
-{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const TILE = 300;          // scenery repeats every TILE metres
 const MAX = 38;            // m/s top speed (~85 mph)
@@ -194,18 +199,24 @@ function initAudio(){
   if (AC) return;
   try {
     AC = new (window.AudioContext || window.webkitAudioContext)();
-    // engine = a looped combustion cycle: per-cylinder thump + exhaust crackle + rumble,
-    // revved by playbackRate — reads as a motor, not an oscillator
+    // engine = F1-style scream: a saw-rich harmonic stack over a high firing frequency,
+    // plus periodic pseudo-noise rasp AM'd by the firing cycle. Every component is an
+    // integer-Hz sine, so the 1-second buffer loops with no seam click. Revved by playbackRate.
     const sr = AC.sampleRate;
-    const period = Math.round(sr/40), len = period*40;   // exact loop, no seam click
+    const len = sr;                                      // exactly 1 s — integer-Hz sines loop clean
     const buf = AC.createBuffer(1, len, sr);
     const d = buf.getChannelData(0);
+    const F0 = 100;                                      // firing fundamental at playbackRate 1
+    const ph = Array.from({length: 21}, () => Math.random()*2*Math.PI);
+    const rasp = Array.from({length: 40}, () => [700 + Math.floor(Math.random()*3300), Math.random()*2*Math.PI]);
     for (let i = 0; i < len; i++){
-      const t = (i % period)/sr;
-      const thump = Math.exp(-t*160)*Math.sin(2*Math.PI*80*t);
-      const crackle = (Math.random()*2 - 1)*Math.exp(-t*240)*0.7;
-      const rumble = 0.4*Math.sin(2*Math.PI*i/period) + 0.2*Math.sin(Math.PI*i/period);
-      d[i] = thump + crackle + rumble;
+      const t = i/sr;
+      let v = 0.22*Math.sin(2*Math.PI*50*t);             // a little body under the scream
+      for (let h = 1; h <= 20; h++) v += Math.sin(2*Math.PI*F0*h*t + ph[h])/Math.pow(h, 0.85);
+      let n = 0;
+      for (const [f, p] of rasp) n += Math.sin(2*Math.PI*f*t + p);
+      v += n*0.02*(0.6 + 0.4*Math.sin(2*Math.PI*F0*t)); // rasp breathes with the firing cycle
+      d[i] = v;
     }
     let mx = 0;
     for (let i = 0; i < len; i++) mx = Math.max(mx, Math.abs(d[i]));
@@ -215,7 +226,7 @@ function initAudio(){
     engineSrc.loop = true;
     engineFilter = AC.createBiquadFilter();
     engineFilter.type = 'lowpass';
-    engineFilter.frequency.value = 350;
+    engineFilter.frequency.value = 700;
     engineGain = AC.createGain(); engineGain.gain.value = 0;
     engineSrc.connect(engineFilter); engineFilter.connect(engineGain); engineGain.connect(AC.destination);
     engineSrc.start();
@@ -296,6 +307,10 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, {left:-110, right:110, top:110, bottom:-110, near:1, far:280});
 sun.shadow.camera.updateProjectionMatrix();
 scene.add(sun, sun.target);
+
+// neutral studio reflections so painted/metal surfaces read as 3D, not flat (car paint needs this)
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
@@ -483,357 +498,128 @@ const tileProto = makeTile();
 const tiles = [tileProto, tileProto.clone(), tileProto.clone()];
 tiles.forEach(t => scene.add(t));
 
-// ---------- cars: true 3D body lofted from the reference photos, photo-projected ----------
-const VIEWS = {back: 'Reference/back.png', front: 'Reference/front.png', side: 'Reference/side.png'};
-// recolor only red-dominant (paint) pixels so tires/glass/chrome stay true to the photo
-const CAR_TINTS = {
-  red:    null,
-  blue:   (r, g, b) => [b, g, r],
-  yellow: (r, g, b) => [r, r*0.82, b*0.35],
-  green:  (r, g, b) => [g, r, b],
-  orange: (r, g, b) => [r, r*0.5, b*0.25],
-  purple: (r, g, b) => [r*0.85, g*0.6, r*0.95],
-  silver: (r, g, b) => { const L = r*0.55 + g*0.3 + b*0.15; return [L*1.05, L*1.08, L*1.12]; },
-  black:  (r, g, b) => [r*0.16, g*0.16, b*0.2],
-};
+// ---------- cars: one cyberpunk GLB for every car on the grid ----------
+// each car clones the template and owns a repaintable copy of the baked texture.
+// body panels are the neutral 27..36 grays (41% of pixels); tires/glass/trim live in
+// other bands, the ORM metallic channel masks glass, and the windshield island is spared
 const cap = s => s[0].toUpperCase() + s.slice(1);
 // feminine Arabic color adjectives ("the blue car" -> السيارة الزرقاء)
 const AR_COLOR = {red: 'الحمراء', blue: 'الزرقاء', yellow: 'الصفراء', green: 'الخضراء',
                   orange: 'البرتقالية', purple: 'البنفسجية', silver: 'الفضية', black: 'السوداء'};
+const CAR_LEN = 4.5;                       // metres
+const GLB_TINT = {red:0xff2a3a, blue:0x2a72ff, yellow:0xffd21e, green:0x33ff6a,
+                  orange:0xff7a1e, purple:0xc24cff, silver:0x8fd8ff, black:0x00d0ff};
+const BODY_TINT = {red:[192,40,44], blue:[40,84,208], yellow:[214,172,30], green:[42,158,66],
+                   orange:[210,102,26], purple:[132,56,180], silver:[186,190,196], black:[30,30,30]};
 let playerColor = 'red';
 try { playerColor = localStorage.carColor || 'red'; } catch {}
-if (!(playerColor in CAR_TINTS)) playerColor = 'red';
+if (!(playerColor in BODY_TINT)) playerColor = 'red';
 const rivalColors = ['blue', 'yellow', 'green', 'red'].filter(c => c !== playerColor).slice(0, 3);
-const PAINT_BASE = [170, 30, 40];          // matte GT3 paint sampled from the renders
-const CAR_LEN = 4.5, CAR_WIDE = 2.05;      // metres; CAR_WIDE = front/back photo bbox incl mirrors
-const carTex = {};                         // carTex[view][tint] = CanvasTexture
-const carTexCv = {};                       // matching canvases (sampled for the hood strip)
-const carTopTex = {};                      // per-tint hood/roof gradient sampled from the side photo
-let sideOutline = null;
-const cropCv = {};                         // keyed+cropped untinted canvas per view
-const pendingCars = [];                    // groups waiting for geometry + textures
-let carGeo = null, wingSpec = null;
-const darkMat = new THREE.MeshStandardMaterial({color:0x141416, roughness:.6, side:THREE.DoubleSide});
-const glassMat = new THREE.MeshStandardMaterial({color:0x14161c, roughness:.2, metalness:.5, side:THREE.DoubleSide});
+let glbTemplate = null, glbBase = null, glbMask = null, glbEmis = null;
+const pendingGlb = [];                     // cars created before the model file arrives
 
-// key out the studio backdrop: flood-fill neutral bright pixels from the borders, so
-// enclosed bright details (seats behind glass) survive; returns keyed canvas + car bbox
-function keyBackground(img){
-  const cv = document.createElement('canvas');
-  cv.width = img.width; cv.height = img.height;
+// repaint one car's canvas: body panels take the tint, everything else keeps the baked look
+function paintBody(cv, name){
+  const [tr, tg, tb] = BODY_TINT[name] || BODY_TINT.red;
   const g = cv.getContext('2d');
-  g.drawImage(img, 0, 0);
+  g.drawImage(glbBase, 0, 0);
   const W = cv.width, H = cv.height;
-  const d = g.getImageData(0, 0, W, H), px = d.data;
-  const bgLike = p => {
-    const r = px[p*4], gg = px[p*4+1], b = px[p*4+2];
-    // neutral and brighter than tire-rubber: backdrop AND its ground shadow, but not the car
-    return Math.max(r, gg, b) - Math.min(r, gg, b) <= 20 && (r + gg + b) > 210;
-  };
-  const seen = new Uint8Array(W*H), stack = [];
-  for (let x = 0; x < W; x++) stack.push(x, x + (H-1)*W);
-  for (let y = 0; y < H; y++) stack.push(y*W, y*W + W - 1);
-  while (stack.length){
-    const p = stack.pop();
-    if (seen[p]) continue;
-    seen[p] = 1;
-    if (!bgLike(p)) continue;
-    px[p*4+3] = 0;
-    const x = p % W;
-    if (x > 0) stack.push(p - 1);
-    if (x < W - 1) stack.push(p + 1);
-    if (p >= W) stack.push(p - W);
-    if (p < W*(H-1)) stack.push(p + W);
-  }
-  let minX = W, maxX = 0, minY = H, maxY = 0;
-  for (let p = 0; p < W*H; p++){
-    if (px[p*4+3] > 8){
-      const x = p % W, y = (p - x)/W;
-      if (x < minX) minX = x; if (x > maxX) maxX = x;
-      if (y < minY) minY = y; if (y > maxY) maxY = y;
-    }
+  const d = g.getImageData(0, 0, W, H), q = d.data;
+  // windshield UV island (located by quadrant-marker probing) — glass must not take paint
+  const wx1 = 0.25*W, wy0 = 0.73*H, wy1 = 0.88*H;
+  for (let i = 0; i < q.length; i += 4){
+    const r = q[i], p = i/4, x = p % W, y = (p - x)/W;
+    if (x < wx1 && y >= wy0 && y < wy1) continue;      // windshield stays glass
+    if (glbMask && !glbMask[i/4]) continue;            // glass/plastic: not metallic, keep dark
+    if (r < 27 || r > 36 || Math.max(r, q[i+1], q[i+2]) - Math.min(r, q[i+1], q[i+2]) > 2) continue;
+    const s = r/30;                                    // keep the fill-level shading steps
+    q[i] = Math.min(255, tr*s); q[i+1] = Math.min(255, tg*s); q[i+2] = Math.min(255, tb*s);
   }
   g.putImageData(d, 0, 0);
-  return {cv, minX, minY, w: maxX - minX + 1, h: maxY - minY + 1};
 }
 
-let viewsPending = Object.keys(VIEWS).length;
-for (const [view, file] of Object.entries(VIEWS)){
-  const img = new Image();
-  img.src = file;
-  img.onload = () => {
-    const {cv, minX, minY, w, h} = keyBackground(img);
-    const crop = document.createElement('canvas'); crop.width = w; crop.height = h;
-    crop.getContext('2d').drawImage(cv, minX, minY, w, h, 0, 0, w, h);
-    cropCv[view] = crop;
-    carTex[view] = {};
-    for (const name of new Set([playerColor, ...rivalColors])) carTex[view][name] = tintedTexture(view, name);
-    if (--viewsPending === 0) buildCars();
-  };
+// recolour an existing car (or record the tint for when the model arrives)
+function tintCar(group, name){
+  group.userData.tint = name;
+  const p = group.userData.paint;
+  if (!p) return;
+  paintBody(p.cv, name);
+  p.tex.needsUpdate = true;
+  p.mat.emissive.setHex(GLB_TINT[name] || 0x00d0ff);
 }
 
-// build (or fetch) the paint-tinted photo texture for one view
-function tintedTexture(view, name){
-  const crop = cropCv[view], w = crop.width, h = crop.height;
-  const tint = CAR_TINTS[name];
-  const c2 = document.createElement('canvas'); c2.width = w; c2.height = h;
-  const g2 = c2.getContext('2d');
-  g2.drawImage(crop, 0, 0);
-  if (tint){
-    const dd = g2.getImageData(0, 0, w, h), q = dd.data;
-    for (let i = 0; i < q.length; i += 4){
-      const r = q[i], gg = q[i+1], b = q[i+2];
-      if (q[i+3] <= 8 || r <= gg*1.35 || r <= b*1.35) continue;
-      if (view === 'back'){
-        // taillight strips are the same red as the paint — spare them spatially so they stay red
-        const p = i/4, fx = (p % w)/w, fy = ((p - p % w)/w)/h;
-        if (fy > 0.335 && fy < 0.415 && ((fx > 0.05 && fx < 0.33) || (fx > 0.67 && fx < 0.95))) continue;
-      }
-      const t = tint(r, gg, b);
-      q[i] = t[0]; q[i+1] = t[1]; q[i+2] = t[2];
-    }
-    g2.putImageData(dd, 0, 0);
+// clone the template into `group` with its own material + paint canvas
+function dressCar(group, name){
+  group.userData.tint = name;
+  if (!glbTemplate){ pendingGlb.push(group); return; }
+  const car = glbTemplate.clone(true);
+  let mesh = null;
+  car.traverse(o => { if (o.isMesh) mesh = o; });
+  const mat = mesh.material = mesh.material.clone();
+  if (glbEmis) mat.emissiveMap = glbEmis;
+  if (glbBase){
+    const bm = glbTemplate.userData.baseMap;
+    const cv = document.createElement('canvas');
+    cv.width = glbBase.width; cv.height = glbBase.height;
+    const tex = new THREE.CanvasTexture(cv);
+    tex.flipY = bm.flipY; tex.colorSpace = bm.colorSpace;
+    tex.wrapS = bm.wrapS; tex.wrapT = bm.wrapT;
+    mat.map = tex;
+    group.userData.paint = {cv, tex, mat};
   }
-  carTexCv[view] = carTexCv[view] || {};
-  carTexCv[view][name] = c2;
-  const tex = new THREE.CanvasTexture(c2);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-// hood/roof/deck paint: a 1-px strip sampled just beneath the side photo's outline, so the
-// top panels carry the photo's own shading and melt into the body with no seam
-function topStripTexture(name){
-  const {top, W, H} = sideOutline;
-  const src = carTexCv.side[name].getContext('2d').getImageData(0, 0, W, H).data;
-  const raw = new Float32Array(W*3);
-  for (let x = 0; x < W; x++){
-    let r = 0, g = 0, b = 0, n = 0;
-    for (let k = 2; k <= 7; k++){
-      const y = Math.min(H - 1, top[x] + k);
-      const i = (y*W + x)*4;
-      if (src[i+3] > 60){ r += src[i]; g += src[i+1]; b += src[i+2]; n++; }
-    }
-    if (!n) n = 1;
-    raw[x*3] = r/n; raw[x*3+1] = g/n; raw[x*3+2] = b/n;
-  }
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = 1;
-  const ctx = cv.getContext('2d');
-  const out = ctx.createImageData(W, 1);
-  for (let x = 0; x < W; x++){
-    let r = 0, g = 0, b = 0, n = 0;                       // soft blur along the length
-    for (let k = -7; k <= 7; k++){
-      const j = Math.min(W - 1, Math.max(0, x + k));
-      r += raw[j*3]; g += raw[j*3+1]; b += raw[j*3+2]; n++;
-    }
-    out.data[x*4] = r/n; out.data[x*4+1] = g/n; out.data[x*4+2] = b/n; out.data[x*4+3] = 255;
-  }
-  ctx.putImageData(out, 0, 0);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-function ensureTint(name){
-  if (!cropCv.side || !cropCv.back || !cropCv.front) return;
-  for (const view of Object.keys(VIEWS)){
-    carTex[view] = carTex[view] || {};
-    if (!carTex[view][name]) carTex[view][name] = tintedTexture(view, name);
-  }
-  if (sideOutline && !carTopTex[name]) carTopTex[name] = topStripTexture(name);
+  group.add(car);
+  tintCar(group, group.userData.tint);
 }
 
-// measure the side silhouette pixel-by-pixel and loft a true 3D body from it;
-// the photos are then projected onto the surfaces (side->flanks, back->tail, front->nose)
-function buildCars(){
-  const cv = cropCv.side, W = cv.width, H = cv.height;
-  const A = cv.getContext('2d').getImageData(0, 0, W, H).data;
-  const solid = (x, y) => A[(y*W + x)*4 + 3] > 60;
-
-  // per column: collect solid runs; the wing is a detached run floating above the rear deck
-  const runs = [];
-  for (let x = 0; x < W; x++){
-    const col = [];
-    let y = 0;
-    while (y < H){
-      if (solid(x, y)){
-        const y0 = y;
-        while (y < H && solid(x, y)) y++;
-        col.push([y0, y]);
-      } else y++;
-    }
-    runs.push(col);
-  }
-  let wingX0 = -1, wingX1 = -1, wingTopPx = H, wingBotPx = 0;
-  for (let x = Math.floor(W*0.55); x < W; x++){
-    const col = runs[x];
-    if (col.length < 2) continue;
-    let bLen = 0, bIdx = 0;
-    col.forEach((r, i) => { if (r[1] - r[0] > bLen){ bLen = r[1] - r[0]; bIdx = i; } });
-    if (bIdx > 0 && col[bIdx][0] - col[0][1] > 4){        // blade detached above the body run
-      if (wingX0 < 0) wingX0 = x;
-      wingX1 = x;
-      wingTopPx = Math.min(wingTopPx, col[0][0]);
-      wingBotPx = Math.max(wingBotPx, col[0][1]);
+new GLTFLoader().load('cyberpunk_car.glb', gltf => {
+  const car = gltf.scene;
+  car.rotation.y = Math.PI;                       // model's nose is -z; flip before measuring
+  const size = new THREE.Box3().setFromObject(car).getSize(new THREE.Vector3());
+  car.scale.setScalar(CAR_LEN / size.z);          // fit length to a real car
+  const box = new THREE.Box3().setFromObject(car), c = box.getCenter(new THREE.Vector3());
+  car.position.set(-c.x, -box.min.y, -c.z);       // centre x/z, wheels on the ground
+  let mesh = null;
+  car.traverse(o => { if (o.isMesh){ o.castShadow = true; o.material.envMapIntensity = 1.3; mesh = o; } });
+  const bm = mesh.material.map;
+  if (bm && bm.image){
+    glbBase = bm.image;
+    car.userData.baseMap = bm;
+    // body paint is semi-metallic, glass/plastic isn't — the ORM blue channel is a free paint mask
+    const om = mesh.material.metalnessMap;
+    if (om && om.image){
+      const mc = document.createElement('canvas');
+      mc.width = glbBase.width; mc.height = glbBase.height;
+      const mg = mc.getContext('2d');
+      mg.drawImage(om.image, 0, 0, mc.width, mc.height);
+      const md = mg.getImageData(0, 0, mc.width, mc.height).data;
+      glbMask = new Uint8Array(md.length/4);
+      for (let i = 0; i < glbMask.length; i++) glbMask[i] = md[i*4+2] >= 40 ? 1 : 0;
     }
   }
-  // body outline: longest solid run per column
-  const top = new Array(W), bot = new Array(W);
-  for (let x = 0; x < W; x++){
-    let bLen = 0, bTop = 0, bBot = H;
-    for (const [y0, y1] of runs[x]){
-      if (y1 - y0 > bLen){ bLen = y1 - y0; bTop = y0; bBot = y1; }
-    }
-    top[x] = bTop; bot[x] = bBot;
+  // desaturate the baked glow map to a mask, so each car's neon colour reads true
+  const em = mesh.material.emissiveMap;
+  if (em && em.image){
+    const im = em.image, cv = document.createElement('canvas');
+    cv.width = im.width; cv.height = im.height;
+    const g = cv.getContext('2d'); g.drawImage(im, 0, 0);
+    const d = g.getImageData(0, 0, cv.width, cv.height), q = d.data;
+    for (let i = 0; i < q.length; i += 4) q[i] = q[i+1] = q[i+2] = Math.max(q[i], q[i+1], q[i+2]);
+    g.putImageData(d, 0, 0);
+    glbEmis = new THREE.CanvasTexture(cv);
+    glbEmis.flipY = em.flipY; glbEmis.colorSpace = em.colorSpace;
+    glbEmis.wrapS = em.wrapS; glbEmis.wrapT = em.wrapT;
   }
-  // behind the roof peak a 911's outline only descends — this erases the swan-neck posts
-  // (and any wing residue) that would otherwise pose as bodywork
-  let peak = 1;
-  for (let x = 1; x < Math.floor(W*0.55); x++) if (top[x] < top[peak]) peak = x;
-  for (let x = peak + 1; x < W; x++) top[x] = Math.max(top[x], top[x-1]);
-  for (let k = 0; k < 3; k++)
-    for (let x = 1; x < W - 1; x++){
-      top[x] = (top[x-1] + top[x]*2 + top[x+1])/4;
-      bot[x] = (bot[x-1] + bot[x]*2 + bot[x+1])/4;
-    }
+  glbTemplate = car;
+  pendingGlb.splice(0).forEach(g => dressCar(g, g.userData.tint));
+}, undefined, e => console.error('car load failed', e));
 
-  const ground = Math.max(...bot);
-  sideOutline = {top: top.map(v => Math.round(v)), W, H};
-  const S = CAR_LEN / W;                                  // metres per pixel along the car
-  const rawH = (ground - Math.min(...top))*S;
-  const SY = S*(1.31/rawH);                               // vertical scale calibrated: a 991 GT3 stands 1.31 m
-  const colZ = x => CAR_LEN/2 - (x/(W - 1))*CAR_LEN;      // nose points left in side.png
-  const colTopY = x => (ground - top[Math.round(x)])*SY;
-  const colBotY = x => Math.max(0, (ground - bot[Math.round(x)])*SY);
-  const carH = 1.31;
-  const beltY = carH*0.55;
-
-  // trim the knife-edge bumper tips so the loft ends in real vertical faces for the photo caps
-  const secH = x => bot[Math.round(x)] - top[Math.round(x)];
-  let maxSec = 0;
-  for (let x = 0; x < W; x++) maxSec = Math.max(maxSec, secH(x));
-  let xLo = 0, xHi = W - 1;
-  while (xLo < W/2 && secH(xLo) < maxSec*0.42) xLo++;
-  while (xHi > W/2 && secH(xHi) < maxSec*0.42) xHi--;
-  const bScale = CAR_WIDE/cropCv.back.width,  bRealH = cropCv.back.height*bScale;
-  const fScale = CAR_WIDE/cropCv.front.width, fRealH = cropCv.front.height*fScale;
-  window.__carDebug = {sideW: W, sideH: H, ground, carH: +carH.toFixed(3), beltY: +beltY.toFixed(3),
-    bRealH: +bRealH.toFixed(3), fRealH: +fRealH.toFixed(3), xLo, xHi,
-    tailTopY: +colTopY(xHi).toFixed(3), tailBotY: +colBotY(xHi).toFixed(3),
-    noseTopY: +colTopY(xLo).toFixed(3), noseBotY: +colBotY(xLo).toFixed(3)};
-
-  // 6 material buckets: 0 side photo, 1 back photo, 2 front photo, 3 paint, 4 underside, 5 glass
-  const P = [[], [], [], [], [], []], U = [[], [], [], [], [], []];
-  const quad = (m, a, b, c, d, ua, ub, uc, ud) => {
-    P[m].push(...a, ...b, ...c, ...a, ...c, ...d);
-    U[m].push(...ua, ...ub, ...uc, ...ua, ...uc, ...ud);
-  };
-  const sideUV = (x, y) => [x/(W - 1), 1 - (ground - y/SY)/H];
-
-  const N = 64;
-  const ring = i => {
-    const x = xLo + (i/(N - 1))*(xHi - xLo);
-    const z = colZ(x), yt = colTopY(x), yb = colBotY(x);
-    const hips = 1 + 0.09*Math.exp(-(((z + 1.35)/0.8)**2)) + 0.05*Math.exp(-(((z - 1.45)/0.9)**2));
-    const wh = 0.90*hips;
-    const cab = yt > beltY + 0.12;
-    const wt = (cab ? 0.60 : 0.86)*wh;
-    const ys = yb + (yt - yb)*0.62;
-    return {x, z, yt, yb, ys, cab,
-      v: [[-wh, yb, z], [-wh, ys, z], [-wt, yt, z], [wt, yt, z], [wh, ys, z], [wh, yb, z]]};
-  };
-
-  let a = ring(0);
-  for (let i = 1; i < N; i++){
-    const b = ring(i);
-    const ua0 = sideUV(a.x, a.yb), ua1 = sideUV(a.x, a.ys), ua2 = sideUV(a.x, a.yt);
-    const ub0 = sideUV(b.x, b.yb), ub1 = sideUV(b.x, b.ys), ub2 = sideUV(b.x, b.yt);
-    quad(0, a.v[0], a.v[1], b.v[1], b.v[0], ua0, ua1, ub1, ub0);      // left flank
-    quad(0, a.v[1], a.v[2], b.v[2], b.v[1], ua1, ua2, ub2, ub1);
-    quad(0, a.v[5], a.v[4], b.v[4], b.v[5], ua0, ua1, ub1, ub0);      // right flank
-    quad(0, a.v[4], a.v[3], b.v[3], b.v[4], ua1, ua2, ub2, ub1);
-    const steep = Math.abs(b.yt - a.yt)/Math.max(0.001, Math.abs(b.z - a.z)) > 0.3;
-    const z0 = [0, 0];
-    if ((a.cab || b.cab) && steep){
-      // sloped canopy: project the rear/front photo so the real glass (and seats) shows
-      const rear = (a.z + b.z) < 0;
-      const uvv = rear
-        ? v => [0.5 + v[0]/CAR_WIDE, Math.min(0.999, v[1]/bRealH + 0.065)]
-        : v => [0.5 - v[0]/CAR_WIDE, Math.min(0.999, v[1]/fRealH + 0.05)];
-      quad(rear ? 1 : 2, a.v[2], a.v[3], b.v[3], b.v[2], uvv(a.v[2]), uvv(a.v[3]), uvv(b.v[3]), uvv(b.v[2]));
-    } else {
-      // painted panel mapped onto the photo-sampled paint strip (u = position along the car)
-      const sa2 = [ua2[0], 0.5], sb2 = [ub2[0], 0.5];
-      quad(3, a.v[2], a.v[3], b.v[3], b.v[2], sa2, sa2, sb2, sb2);
-    }
-    quad(4, a.v[0], a.v[5], b.v[5], b.v[0], z0, z0, z0, z0);          // underside
-    a = b;
-  }
-  const cap = (r, m, uvOf) => {
-    const c = r.v;
-    for (let i = 1; i < 5; i++){
-      P[m].push(...c[0], ...c[i], ...c[i+1]);
-      U[m].push(...uvOf(c[0]), ...uvOf(c[i]), ...uvOf(c[i+1]));
-    }
-  };
-  // small v offsets compensate for shadow rows still inside the front/back crops
-  cap(ring(0), 2, v => [0.5 - v[0]/CAR_WIDE, Math.min(0.999, v[1]/fRealH + 0.05)]);      // nose (front photo mirrors x)
-  cap(ring(N - 1), 1, v => [0.5 + v[0]/CAR_WIDE, Math.min(0.999, v[1]/bRealH + 0.065)]); // tail, anchored to the taillight row
-
-  const geo = new THREE.BufferGeometry();
-  const allP = [], allU = [];
-  let start = 0;
-  P.forEach((arr, m) => {
-    if (!arr.length) return;
-    geo.addGroup(start, arr.length/3, m);
-    start += arr.length/3;
-    for (const v of arr) allP.push(v);
-    for (const v of U[m]) allU.push(v);
-  });
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(allP, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(allU, 2));
-  geo.computeVertexNormals();
-  carGeo = geo;
-
-  if (wingX0 >= 0){
-    const z0 = colZ(wingX1), z1 = colZ(wingX0);
-    wingSpec = {z: (z0 + z1)/2, depth: Math.max(0.3, Math.min(0.6, z1 - z0)),
-                y: (ground - wingTopPx)*SY, deckY: colTopY((wingX0 + wingX1)/2)};
-  }
-  pendingCars.forEach(pc => populateCar(pc.g, pc.tint));
-}
-
-function populateCar(g, tint){
-  ensureTint(tint);
-  const add = m => { m.userData.car = true; g.add(m); };   // tagged so a repaint can strip them
-  // hood/roof/deck wear the photo-sampled paint strip — same shading as the body, no seams
-  const paint = new THREE.MeshBasicMaterial({map: carTopTex[tint], side: THREE.DoubleSide});
-  const photo = view => new THREE.MeshBasicMaterial({map: carTex[view][tint], side:THREE.DoubleSide});
-  const body = new THREE.Mesh(carGeo, [photo('side'), photo('back'), photo('front'), paint, darkMat, glassMat]);
-  body.castShadow = true;
-  add(body);
-  if (wingSpec){
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.05, wingSpec.depth), paint);
-    blade.position.set(0, wingSpec.y - 0.025, wingSpec.z);
-    blade.castShadow = true;
-    add(blade);
-    for (const x of [-0.55, 0.55]){
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.07, Math.max(0.1, wingSpec.y - wingSpec.deckY), 0.09), darkMat);
-      post.position.set(x, (wingSpec.y + wingSpec.deckY)/2, wingSpec.z + wingSpec.depth*0.2);
-      add(post);
-    }
-  }
-}
-
-function makeCar(tint){
-  const g = new THREE.Group();
-  pendingCars.push({g, tint});
-  if (carGeo) populateCar(g, tint);
-  return g;
-}
-
-const player = makeCar(playerColor);
+const player = new THREE.Group();
 scene.add(player);
+dressCar(player, playerColor);
+window.__paint = {tint: n => tintCar(player, n)};   // debug hook
+
 let px = -1.5, pz = 0, heading = 0, speed = 0;
-window.dbg = () => ({px, pz, heading, speed, boostT: +boostT.toFixed(2), boostCount, carsReady: !!carGeo,
+window.dbg = () => ({px, pz, heading, speed, boostT: +boostT.toFixed(2), boostCount, carsReady: !!glbTemplate,
   stick: [+stickX.toFixed(2), +stickY.toFixed(2)],
   audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',   // console self-check: D at speed => heading down, px down
   nextRing: (() => { const b = boosters.find(b => !b.taken && b.z > pz); return b ? {x: b.x, dz: +(b.z - pz).toFixed(0)} : null; })(),
@@ -848,7 +634,8 @@ const fmtTime = t => `${Math.floor(t/60)}:${(t % 60).toFixed(1).padStart(4, '0')
 
 const LANES = [-4.5, -1.5, 1.5, 4.5];
 const rivals = [-4.5, 1.5, 4.5].map((lx, i) => {
-  const mesh = makeCar(rivalColors[i]);
+  const mesh = new THREE.Group();
+  dressCar(mesh, rivalColors[i]);
   mesh.position.set(lx, 0, 0);
   scene.add(mesh);
   // ponytail: rubber-band AI — base speed below player max, boosts when dropped
@@ -1098,18 +885,13 @@ THEMES.forEach((t, i) => {
 function recolorPlayer(name){
   playerColor = name;
   try { localStorage.carColor = name; } catch {}
-  const pend = pendingCars.find(p => p.g === player);
-  if (pend) pend.tint = name;              // photos may still be loading
-  if (!carGeo) return;
-  [...player.children].filter(m => m.userData.car).forEach(m => player.remove(m));
-  populateCar(player, name);
+  tintCar(player, name);
   const used = new Set([name, ...rivals.map(r => r.tint)]);
   for (const r of rivals){
     if (r.tint !== name) continue;
-    const free = Object.keys(CAR_TINTS).find(c => !used.has(c));
+    const free = Object.keys(BODY_TINT).find(c => !used.has(c));
     r.tint = free; r.name = cap(free); used.add(free);
-    [...r.mesh.children].filter(m => m.userData.car).forEach(m => r.mesh.remove(m));
-    populateCar(r.mesh, free);
+    tintCar(r.mesh, free);
   }
 }
 // race distance chips: applies immediately in the lobby, next race if changed mid-race
@@ -1128,10 +910,9 @@ const lensEl = document.getElementById('lens');
 });
 
 const colorsEl = document.getElementById('colors');
-Object.entries(CAR_TINTS).forEach(([name, fn]) => {
+Object.entries(BODY_TINT).forEach(([name, rgb]) => {
   const b = document.createElement('button');
-  const pc = fn ? fn(...PAINT_BASE) : PAINT_BASE;
-  b.style.background = `rgb(${pc[0]|0}, ${pc[1]|0}, ${pc[2]|0})`;
+  b.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
   b.title = AR_COLOR[name] || name;
   if (name === playerColor) b.classList.add('sel');
   b.addEventListener('click', () => {
@@ -1284,8 +1065,8 @@ function frame(now){
   // engine revs with speed: playback rate = RPM, filter opens under load, snarls on boost
   if (AC && !muted && engineSrc){
     const rev = Math.abs(speed)/MAX;
-    engineSrc.playbackRate.setTargetAtTime(0.55 + rev*1.25 + (boostT > 0 ? 0.3 : 0), AC.currentTime, 0.08);
-    engineFilter.frequency.setTargetAtTime(320 + rev*1600 + (boostT > 0 ? 500 : 0), AC.currentTime, 0.1);
+    engineSrc.playbackRate.setTargetAtTime(0.6 + rev*1.9 + (boostT > 0 ? 0.35 : 0), AC.currentTime, 0.08);
+    engineFilter.frequency.setTargetAtTime(700 + rev*5200 + (boostT > 0 ? 900 : 0), AC.currentTime, 0.1);
     const ev = finished ? 0.05 : (Math.abs(speed) > 0.5 || drv ? 0.2 + rev*0.22 : 0.11);
     engineGain.gain.setTargetAtTime(ev, AC.currentTime, 0.1);
   }
