@@ -83,6 +83,14 @@
   #lens button{font:700 12px system-ui;padding:8px 14px;border-radius:9px;border:2px solid rgba(255,255,255,.25);
     background:rgba(255,255,255,.08);color:#fff;cursor:pointer}
   #lens button.sel{border-color:#ffd23f;color:#ffd23f}
+  #modes{display:flex;gap:9px;flex-wrap:wrap;justify-content:center}
+  #modes button{font:800 15px system-ui;padding:11px 22px;border-radius:11px;border:2px solid rgba(255,255,255,.28);
+    background:rgba(255,255,255,.08);color:#fff;cursor:pointer}
+  #modes button.sel{border-color:#ffd23f;color:#ffd23f;background:rgba(255,210,63,.13)}
+  #themeSect{display:flex;flex-direction:column;align-items:center;gap:12px}
+  #cityBtns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  #cityBtns button{font:800 15px system-ui;padding:13px 22px;border-radius:12px;border:none;color:#fff;cursor:pointer;
+    background:#2d6cdf;box-shadow:0 6px 18px rgba(45,108,223,.4)}
   #colors{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:420px}
   #colors button{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);cursor:pointer}
   #colors button.sel{border-color:#ffd23f;box-shadow:0 0 12px rgba(255,210,63,.7)}
@@ -150,17 +158,22 @@
   <div id="menuTop">
     <h1>لعبة ناصر</h1>
     <button id="resumeBtn" class="big" style="background:#2fae4e;box-shadow:0 6px 18px rgba(47,174,78,.4)">◀ العودة إلى السباق</button>
-    <button id="playCampaign" class="big"></button>
-    <div class="sep">سباق حر &mdash; اختر خريطة</div>
-    <div id="maps"></div>
+    <div class="sep">&#x1F3CE;&#xFE0F; نوع السباق</div>
+    <div id="modes"></div>
+    <div id="themeSect">
+      <button id="playCampaign" class="big"></button>
+      <div class="sep">سباق حر &mdash; اختر خريطة</div>
+      <div id="maps"></div>
+    </div>
+    <div id="cityBtns"></div>
   </div>
   <div id="menuBottom">
-    <div class="sep">&#x1F3C1; مسافة السباق</div>
+    <div class="sep" id="lensSep">&#x1F3C1; عدد اللفات</div>
     <div id="lens"></div>
     <div class="sep">&#x1F3A8; ورشة الطلاء &mdash; اختر لونًا</div>
     <div id="colors"></div>
     <div class="btnRow"><button id="sndBtn"></button><button id="musicBtn"></button><button id="driftBtn"></button></div>
-    <div id="buildTag">v5 · Cyberpunk car by 4d_Bob (CC BY)</div>
+    <div id="buildTag">v7 · Cyberpunk car by 4d_Bob (CC BY) · Procedural City by abhayexe (Sketchfab)</div>
   </div>
 </div>
 
@@ -173,11 +186,16 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-const TILE = 300;          // scenery repeats every TILE metres
 const MAX = 38;            // m/s top speed (~85 mph)
 const clamp = THREE.MathUtils.clamp;
+// circuit geometry (metres): road half-width, curb lip, grass verge, barrier line
+const ROAD_HALF = 7, CURB_W = 0.7, VERGE_W = 16, WALL = ROAD_HALF + 3.2;
+const OFFSETS = [-5, -1.7, 1.7, 5];         // racing-line lanes = lateral offset from centre
 
 // ---------- five challenges, one map each; win to advance ----------
 const THEMES = [
@@ -189,12 +207,33 @@ const THEMES = [
 ];
 let raceCfg = null;
 try { raceCfg = JSON.parse(sessionStorage.raceCfg || 'null'); } catch {}
+// ---------- top-level branch: three kinds of race, chosen in the lobby, persisted ----------
+// TRACK = 'straight' (endless linear road) | 'circle' (closed spline circuit) | 'city' (drivable Sketchfab downtown).
+// straight uses world-x lanes + linear finish; circle & city share the spline engine (project/sampleAt/laps).
+// city has two sub-modes: routed circuit (laps/rivals) or free-roam (no laps, buildings block you).
+let TRACK = 'straight';
+try { TRACK = localStorage.trackMode || 'straight'; } catch {}
+if (raceCfg && raceCfg.track) TRACK = raceCfg.track;
+if (!['straight', 'circle', 'city'].includes(TRACK)) TRACK = 'straight';
+let CITY_ROAM = false;
+try { CITY_ROAM = localStorage.cityRoam === '1'; } catch {}
+if (raceCfg && raceCfg.cityRoam != null) CITY_ROAM = !!raceCfg.cityRoam;
+const SPLINE = TRACK !== 'straight';       // circle & city drive on a CatmullRom centreline
+const LINEAR = TRACK === 'straight';
+const IS_CITY = TRACK === 'city';
+const FREEROAM = IS_CITY && CITY_ROAM;      // no laps / no finish / no rivals — just the city
+const SPLINE_TRACK = SPLINE && !FREEROAM;   // has a racing line (circle & city-circuit)
 let lvlStored = 1;
 try { lvlStored = parseInt(localStorage.carLevel) || 1; } catch {}
 const campaignLevel = Math.min(THEMES.length, Math.max(1, lvlStored));
-const FREE = !!(raceCfg && raceCfg.mode === 'free');
-const LEVEL = FREE ? Math.min(THEMES.length, Math.max(1, raceCfg.lvl)) : campaignLevel;
-const THEME = THEMES[LEVEL - 1];
+const FREE = IS_CITY || !!(raceCfg && raceCfg.mode === 'free');   // city has no campaign progression
+const LEVEL = (raceCfg && raceCfg.mode === 'free') ? Math.min(THEMES.length, Math.max(1, raceCfg.lvl)) : campaignLevel;
+// city is its own map (not one of the five themes); pick a bright daytime look for the model
+const CITY_THEME = {name: 'المدينة', sky: 0x9fb8d6, ground: 0x3b3b44, sunCol: 0xfff2dc, sunInt: 2.1, hemiInt: 1.05, scen: 'citymodel'};
+const THEME = IS_CITY ? CITY_THEME : THEMES[LEVEL - 1];
+// linear map uses tighter lanes than the spline circuit; city drives on narrow real streets
+const TILE = 300;                          // straight-mode scenery repeats every TILE metres
+const STRAIGHT_LANES = [-4.5, -1.5, 1.5, 4.5];
 let menuOpen = !raceCfg;                   // fresh visit -> main menu; restarts skip straight to the grid
 
 // ---------- sound: all synthesized, no audio files ----------
@@ -318,6 +357,17 @@ scene.add(sun, sun.target);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
+// GLTF loader wired for COMPRESSED assets so the game can take heavier models without blowing the
+// mobile GPU-memory budget: Draco/meshopt shrink geometry, and KTX2/Basis keeps textures compressed
+// IN video memory — a 2K PNG costs ~16 MB of VRAM, the same texture as KTX2 costs ~1-4 MB. Decoders
+// are pulled from the CDN ON DEMAND, so nothing extra downloads until a model that needs them loads.
+const DECODERS = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/';
+const gltfLoader = new GLTFLoader()
+  .setDRACOLoader(new DRACOLoader().setDecoderPath(DECODERS + 'draco/'))
+  .setKTX2Loader(new KTX2Loader().setTranscoderPath(DECODERS + 'basis/').detectSupport(renderer))
+  .setMeshoptDecoder(MeshoptDecoder);
+// to add a heavy model later:  gltfLoader.load('city.glb', gltf => scene.add(gltf.scene));
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
@@ -334,24 +384,26 @@ function canvasTex(size, draw){
   return t;
 }
 
-// road: 256px = 13m wide x 12m long strip (12 divides TILE -> seamless snap)
-const PXM = 256/13;
-const roadTex = canvasTex(256, g => {
-  g.fillStyle = '#57575c'; g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 500; i++){
+// road texture for the ribbon: markings run ACROSS x (road width), the strip tiles along y (length)
+const roadTex = canvasTex(128, g => {
+  g.fillStyle = '#57575c'; g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 400; i++){
     g.fillStyle = Math.random() < .5 ? '#525257' : '#5e5e63';
-    g.fillRect(Math.random()*256, Math.random()*256, 2, 2);
+    g.fillRect(Math.random()*128, Math.random()*128, 2, 2);
   }
-  g.fillStyle = '#e6bf1e';                          // double yellow centre
-  g.fillRect(123, 0, 4, 256); g.fillRect(130, 0, 4, 256);
-  g.fillStyle = '#e9e9e9';                          // dashed lane lines at ±3m
-  for (const x of [128 - 3*PXM, 128 + 3*PXM])
-    for (let y = 0; y < 256; y += 128) g.fillRect(x-1.5, y, 3, 64);
-  g.fillRect(128 - 5.9*PXM, 0, 3, 256);             // solid edge lines
-  g.fillRect(128 + 5.9*PXM - 3, 0, 3, 256);
+  g.fillStyle = '#e9e9e9'; g.fillRect(3, 0, 3, 128); g.fillRect(122, 0, 3, 128);   // solid edge lines
+  g.fillStyle = '#e6bf1e'; g.fillRect(61, 0, 3, 128); g.fillRect(65, 0, 3, 128);   // double yellow centre
+  g.fillStyle = '#e9e9e9';                                                          // dashed lanes at 1/4 & 3/4
+  for (const x of [35, 93]) g.fillRect(x - 1.5, 0, 3, 64);                          // dash y0..64, gap 64..128
 });
-roadTex.repeat.set(1, TILE*3/12);
+roadTex.wrapS = THREE.ClampToEdgeWrapping; roadTex.wrapT = THREE.RepeatWrapping;
 roadTex.anisotropy = renderer.capabilities.getMaxAnisotropy();  // keeps lane markings crisp at grazing angles
+
+// classic red/white racing curb — unlit stripes so they pop in every theme
+const curbTex = canvasTex(16, g => {
+  for (let y = 0; y < 16; y += 8){ g.fillStyle = y % 16 ? '#ececec' : '#d42020'; g.fillRect(0, y, 16, 8); }
+});
+curbTex.wrapT = THREE.RepeatWrapping;
 
 const winTex = canvasTex(64, g => {
   g.fillStyle = '#f4f2ee'; g.fillRect(0, 0, 64, 64);
@@ -362,25 +414,152 @@ const winTex = canvasTex(64, g => {
     }
 });
 
-// ---------- ground / road (uniform strips, snapped to player) ----------
-const grass = new THREE.Mesh(
-  new THREE.PlaneGeometry(600, TILE*3),
-  new THREE.MeshStandardMaterial({color: THEME.ground}));
-grass.rotation.x = -Math.PI/2; grass.position.y = -0.02; grass.receiveShadow = true;
-scene.add(grass);
+// ---------- spline engine: a closed CatmullRom centreline (circle & city-circuit drive on this) ----------
+// straight mode skips all of this and uses world-x lanes instead. Functions live at top level so the
+// main loop can call them; the sample table is (re)built per track by buildSplineTable().
+let N = 1200, pos = [], fwd = [], side = [], sArc = [], segLen = [], L = 1, projHint = 0;
+const wrapDU = (a, b) => { let d = a - b; d -= Math.round(d); return d; };   // signed u-gap in [-.5,.5]
+function sampleAt(u){                  // interpolate the table at fractional u (used by rivals/props)
+  const f = (((u % 1) + 1) % 1) * N, i = Math.floor(f) % N, t = f - Math.floor(f), j = (i + 1) % N;
+  const a = pos[i], b = pos[j];
+  return {x: a.x + (b.x - a.x)*t, y: a.y + (b.y - a.y)*t, z: a.z + (b.z - a.z)*t, fwd: fwd[i], side: side[i]};
+}
+// project a free-driving world point onto the ribbon (windowed search around a hint, global fallback).
+const projSeg = (x, z, i) => {   // squared distance from (x,z) to sample-segment i, with clamped foot t
+  const j = (i + 1) % N, ax = pos[i].x, az = pos[i].z, dx = pos[j].x - ax, dz = pos[j].z - az;
+  let t = ((x - ax)*dx + (z - az)*dz) / (dx*dx + dz*dz || 1); t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return {t, d2: (x - (ax + dx*t))**2 + (z - (az + dz*t))**2};
+};
+function project(x, z){
+  const W = 24;
+  let best = Infinity, bi = projHint, bt = 0, edge = true;
+  for (let k = -W; k <= W; k++){
+    const i = ((projHint + k) % N + N) % N, r = projSeg(x, z, i);
+    if (r.d2 < best){ best = r.d2; bi = i; bt = r.t; edge = (k === -W || k === W); }
+  }
+  if (edge){                         // window edge won -> the nearest is outside it; re-anchor globally
+    for (let i = 0; i < N; i++){
+      const r = projSeg(x, z, i);
+      if (r.d2 < best){ best = r.d2; bi = i; bt = r.t; }
+    }
+  }
+  projHint = bi;
+  const j = (bi + 1) % N, sd = side[bi];
+  const cx = pos[bi].x + (pos[j].x - pos[bi].x)*bt, cz = pos[bi].z + (pos[j].z - pos[bi].z)*bt;
+  return {u: (sArc[bi] + bt*segLen[bi]) / L, off: (x - cx)*sd.x + (z - cz)*sd.z,
+          y: pos[bi].y + (pos[j].y - pos[bi].y)*bt, fwd: fwd[bi], side: sd, cx, cz};
+}
+// ground height at a lateral offset: flat under the road, the verge ramps track height down to 0
+function groundYAt(trackY, off){
+  const a = Math.abs(off), edge = ROAD_HALF + CURB_W;
+  return a <= edge ? trackY : trackY * (1 - Math.min(1, (a - edge) / VERGE_W));
+}
+// ribbon builder: two edges at lateral offsets aOff/bOff swept along the whole loop.
+function buildRibbon(aOff, bOff, mat, opts = {}){
+  const lift = opts.lift || 0, vScale = opts.vScale || 6;
+  const g = new THREE.BufferGeometry(), vtx = [], uv = [], idx = [];
+  for (let i = 0; i <= N; i++){
+    const k = i % N, p = pos[k], sd = side[k];
+    const ay = (opts.aY == null ? p.y : opts.aY) + lift;
+    const by = (opts.bY == null ? p.y : opts.bY) + lift;
+    vtx.push(p.x + sd.x*aOff, ay, p.z + sd.z*aOff, p.x + sd.x*bOff, by, p.z + sd.z*bOff);
+    const v = sArc[k] / vScale; uv.push(0, v, 1, v);
+    if (i < N){ const b = i*2; idx.push(b, b+1, b+2, b+1, b+3, b+2); }
+  }
+  g.setAttribute('position', new THREE.Float32BufferAttribute(vtx, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat); m.receiveShadow = true; return m;
+}
+// build the dense sample table (pos + forward/side unit vectors + cumulative arc length) from control pts
+function buildSplineTable(CP, type = 'catmullrom', tension = 0.5){
+  const curve = new THREE.CatmullRomCurve3(CP, true, type, tension);
+  pos = curve.getSpacedPoints(N).slice(0, N);        // drop the duplicated closing point
+  fwd = []; side = []; sArc = []; segLen = []; L = 0;
+  for (let i = 0; i < N; i++){
+    const a = pos[i], b = pos[(i + 1) % N];
+    const l = Math.hypot(b.x - a.x, b.z - a.z) || 1e-4;
+    segLen[i] = l; sArc[i] = L; L += l;
+  }
+  for (let i = 0; i < N; i++){
+    const a = pos[(i - 1 + N) % N], b = pos[(i + 1) % N];
+    const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+    fwd[i] = {x: dx/l, z: dz/l};
+    side[i] = {x: dz/l, z: -dx/l};    // +side = forward rotated +90° about Y (car's left)
+  }
+}
 
-const road = new THREE.Mesh(
-  new THREE.PlaneGeometry(13, TILE*3),
-  new THREE.MeshStandardMaterial({map:roadTex, roughness:.95}));
-road.rotation.x = -Math.PI/2; road.position.y = 0.05; road.receiveShadow = true;
-scene.add(road);
+// circle: one closed loop with turns, a hairpin & a hill (Vector3 x, elevation, z)
+const CIRCLE_CP = [
+  [ 200, 0,  70], [ 185, 2, 116], [ 145, 6, 150], [  90, 8, 162],
+  [  35, 6, 150], [   2, 3, 116],
+  [ -16, 2, 102], [ -46, 2, 92], [ -58, 2, 76], [ -46, 1, 60], [ -16, 1, 50],
+  [   2, 0,  22], [  35, 0, -10], [  90, 0, -22], [ 145, 0, -10],
+  [ 185, 1,  24],
+].map(p => new THREE.Vector3(p[0], p[1], p[2]));
 
-const curbMat = new THREE.MeshStandardMaterial({color:0xbdbdb6});
-const sidewalks = [-7.5, 7.5].map(x => {
-  const s = new THREE.Mesh(new THREE.BoxGeometry(3, 0.18, TILE*3), curbMat);
-  s.position.set(x, 0.09, 0); s.receiveShadow = true;
-  scene.add(s); return s;
-});
+// city: the routed circuit runs along the model's avenues. Waypoints are in the model's LOCAL coords
+// (read off the top-down street map); the city loader scales/centres the model and the same transform
+// maps these to world so the racing line sits on real streets. See city loader below.
+const CITY_SCALE = 2.2;
+const CITY_LOCAL_CENTER = {x: 25.7, z: -30.8};       // bbox centre of city.glb in local units
+const cityToWorld = (lx, lz, ly = 0) => new THREE.Vector3(
+  (lx - CITY_LOCAL_CENTER.x)*CITY_SCALE, ly*CITY_SCALE, (lz - CITY_LOCAL_CENTER.z)*CITY_SCALE);
+// clockwise loop, A*-routed through the model's streets (clearance-weighted so it hugs street centres).
+// generated once against the in-game occupancy grid at CITY_SCALE; every point is verified clear of buildings.
+const CITY_ROUTE_LOCAL = [
+  [46.6,-44.4],[46.6,-35.3],[46.6,-26.3],[46.6,-17.2],[50.2,-8.1],[48.4,1],[48.4,10.1],[57.5,13.7],[59.3,19.2],[55.7,28.3],[48.4,37.4],[46.6,46.5],
+  [41.2,51.9],[32.1,51.9],[23,51.9],[13.9,51.9],[4.8,51.9],[-4.3,51.9],[-13.4,53.7],[-22.5,51.9],[-31.6,46.5],[-40.7,42.8],[-47.9,33.7],
+  [-51.6,24.7],[-53.4,15.6],[-57,6.5],[-51.6,-2.6],[-49.8,-11.7],[-42.5,-17.2],[-44.3,-26.3],[-44.3,-35.3],[-44.3,-44.4],
+  [-37,-44.4],[-27.9,-44.4],[-18.8,-44.4],[-9.8,-44.4],[-0.7,-46.3],[8.4,-48.1],[10.2,-42.6],[19.3,-44.4],[28.4,-44.4],[37.5,-44.4],
+];
+
+let minX = 0, maxX = 0, minZ = 0, maxZ = 0, cX = 0, cZ = 0, span = 400;
+if (SPLINE_TRACK){                                    // circle & city-circuit need the racing line
+  const CP = IS_CITY ? CITY_ROUTE_LOCAL.map(p => cityToWorld(p[0], p[1])) : CIRCLE_CP;
+  buildSplineTable(CP, IS_CITY ? 'centripetal' : 'catmullrom');   // centripetal hugs the waypoints (no overshoot into buildings)
+  minX = 1e9; maxX = -1e9; minZ = 1e9; maxZ = -1e9;
+  for (const p of pos){ minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
+  cX = (minX + maxX)/2; cZ = (minZ + maxZ)/2; span = Math.max(maxX - minX, maxZ - minZ) + 500;
+}
+
+if (TRACK === 'circle'){                              // ribbon road + curbs + verges + themed ground
+  const road = buildRibbon(ROAD_HALF, -ROAD_HALF,
+    new THREE.MeshStandardMaterial({map: roadTex, roughness: .95}), {vScale: 6, lift: 0.02});
+  scene.add(road);
+  const curbMat = new THREE.MeshBasicMaterial({map: curbTex});
+  scene.add(buildRibbon(ROAD_HALF, ROAD_HALF + CURB_W, curbMat, {vScale: 2, lift: 0.15}));
+  scene.add(buildRibbon(-ROAD_HALF - CURB_W, -ROAD_HALF, curbMat, {vScale: 2, lift: 0.15}));
+  const vergeMat = new THREE.MeshStandardMaterial({color: new THREE.Color(THEME.ground).multiplyScalar(0.82), roughness: 1});
+  scene.add(buildRibbon(ROAD_HALF + CURB_W, ROAD_HALF + CURB_W + VERGE_W, vergeMat, {bY: 0}));
+  scene.add(buildRibbon(-ROAD_HALF - CURB_W - VERGE_W, -ROAD_HALF - CURB_W, vergeMat, {aY: 0}));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(span, span), new THREE.MeshStandardMaterial({color: THEME.ground}));
+  ground.rotation.x = -Math.PI/2; ground.position.set(cX, -0.06, cZ); ground.receiveShadow = true;
+  scene.add(ground);
+  if (THEME.scen === 'coast'){       // an ocean off to one side for the sunset-coast theme
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(span*1.4, span),
+      new THREE.MeshStandardMaterial({color: 0x2f6ea8, roughness: .25, metalness: .5}));
+    water.rotation.x = -Math.PI/2; water.position.set(maxX + span*0.55, -1.4, cZ);
+    scene.add(water);
+  }
+}
+
+// ---------- straight mode: uniform road/grass/curb strips, snapped to the player each frame ----------
+let grass = null, straightRoad = null, sidewalks = [];
+if (LINEAR){
+  grass = new THREE.Mesh(new THREE.PlaneGeometry(600, TILE*3), new THREE.MeshStandardMaterial({color: THEME.ground}));
+  grass.rotation.x = -Math.PI/2; grass.position.y = -0.02; grass.receiveShadow = true;
+  scene.add(grass);
+  straightRoad = new THREE.Mesh(new THREE.PlaneGeometry(13, TILE*3), new THREE.MeshStandardMaterial({map: roadTex, roughness: .95}));
+  straightRoad.rotation.x = -Math.PI/2; straightRoad.position.y = 0.05; straightRoad.receiveShadow = true;
+  scene.add(straightRoad);
+  const walkMat = new THREE.MeshStandardMaterial({color: 0xbdbdb6});
+  sidewalks = [-7.5, 7.5].map(x => {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(3, 0.18, TILE*3), walkMat);
+    s.position.set(x, 0.09, 0); s.receiveShadow = true;
+    scene.add(s); return s;
+  });
+}
 
 // ---------- city tile (buildings + palms), cloned 3x for endless street ----------
 const roofMat = new THREE.MeshStandardMaterial({color:0x8a8a88});
@@ -464,45 +643,179 @@ function pine(x, z){
   return c;
 }
 
-function makeTile(){
-  const g = new THREE.Group();
+// true if (x,z) lands within `clearance` of ANY point on the centreline
+function nearTrack(x, z, clearance){
+  const c2 = clearance*clearance;
+  for (let i = 0; i < N; i += 2) if ((x - pos[i].x)**2 + (z - pos[i].z)**2 < c2) return true;
+  return false;
+}
+// drop a prop onto the terrain at track parameter u and lateral offset (keeps its own base height).
+// a fixed offset crosses the road wherever the loop curves back on itself (the hairpin, the infield),
+// so skip any prop that would land within `clearance` of another part of the track. returns null if skipped.
+function placeProp(prop, u, off, clearance){
+  const c = sampleAt(u), x = c.x + c.side.x*off, z = c.z + c.side.z*off;
+  if (clearance && nearTrack(x, z, clearance)) return null;
+  prop.position.set(x, prop.position.y + groundYAt(c.y, off), z);
+  scene.add(prop); return prop;
+}
+// circle: scatter themed scenery all the way around the loop, just beyond the grass verge
+const EDGE = ROAD_HALF + CURB_W + VERGE_W;
+if (TRACK === 'circle'){
   const scen = THEME.scen;
-  for (const side of [-1, 1]){
-    let z = -TILE/2;
-    while (z < TILE/2 - 10){
+  for (let u = 0; u < 1; u += 0.006){
+    for (const sgn of [-1, 1]){
+      const r = Math.random();
       if (scen === 'city' || scen === 'night'){
-        const w = 8 + Math.random()*10, d = 8 + Math.random()*8, h = 6 + Math.random()*28;
-        if (Math.random() < 0.85){
+        if (r < 0.5){
+          const w = 8 + Math.random()*10, d = 8 + Math.random()*8, h = 6 + Math.random()*26;
           const mat = wallMats[Math.floor(Math.random()*wallMats.length)];
           const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [mat, mat, roofMat, roofMat, mat, mat]);
-          b.position.set(side*(10.5 + w/2 + Math.random()*5), h/2, z + d/2);
           b.castShadow = true;
-          g.add(b);
+          if (placeProp(b, u, sgn*(EDGE + w/2 + Math.random()*8), ROAD_HALF + Math.max(w, d)/2 + 4)) b.position.y += h/2;
         }
-        if (scen === 'city' && Math.random() < 0.55) g.add(palm(side*9.7, z + Math.random()*4));
-        z += d + 3 + Math.random()*6;
+        if (scen === 'city' && Math.random() < 0.35) placeProp(palm(0, 0), u, sgn*(ROAD_HALF + CURB_W + 6), ROAD_HALF + 3);
       } else if (scen === 'desert'){
-        if (Math.random() < 0.6) g.add(dune(side*(30 + Math.random()*45), z));
-        if (Math.random() < 0.55) g.add(cactus(side*(10.5 + Math.random()*7), z + Math.random()*6));
-        if (Math.random() < 0.4) g.add(rock(0x9a7b52, side*(12 + Math.random()*22), z + 5));
-        z += 13 + Math.random()*10;
+        if (r < 0.4) placeProp(dune(1e3, 0), u, sgn*(EDGE + 10 + Math.random()*30), ROAD_HALF + 8);   // big x arg -> full dune
+        if (Math.random() < 0.4) placeProp(cactus(0, 0), u, sgn*(EDGE + Math.random()*8), ROAD_HALF + 4);
+        if (Math.random() < 0.3) placeProp(rock(0x9a7b52, 0, 0), u, sgn*(EDGE + 2 + Math.random()*14), ROAD_HALF + 4);
       } else if (scen === 'snow'){
-        if (Math.random() < 0.85) g.add(pine(side*(10.5 + Math.random()*12), z));
-        if (Math.random() < 0.3) g.add(rock(0xcfd8e2, side*(13 + Math.random()*18), z + 5));
-        z += 11 + Math.random()*8;
+        if (r < 0.6) placeProp(pine(0, 0), u, sgn*(EDGE + Math.random()*14), ROAD_HALF + 4);
+        if (Math.random() < 0.25) placeProp(rock(0xcfd8e2, 0, 0), u, sgn*(EDGE + Math.random()*16), ROAD_HALF + 4);
       } else {                                            // sunset coast
-        if (Math.random() < 0.75) g.add(palm(side*(10 + Math.random()*5), z));
-        if (Math.random() < 0.3) g.add(rock(0xb0a08a, side*(15 + Math.random()*20), z + 4));
-        if (Math.random() < 0.25) g.add(dune(side*(35 + Math.random()*40), z));
-        z += 12 + Math.random()*9;
+        if (r < 0.5) placeProp(palm(0, 0), u, sgn*(EDGE + Math.random()*8), ROAD_HALF + 4);
+        if (Math.random() < 0.25) placeProp(rock(0xb0a08a, 0, 0), u, sgn*(EDGE + 4 + Math.random()*16), ROAD_HALF + 4);
       }
     }
   }
-  return g;
+  // stone gateways straddling the track — a Crash-style landmark on two corners
+  const stoneMat = new THREE.MeshStandardMaterial({color: 0x8d7d63, roughness: 1});
+  for (const au of [0.30, 0.72]){
+    const c = sampleAt(au), g = new THREE.Group();
+    for (const sx of [-1, 1]){
+      const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 6.2, 8), stoneMat);
+      pil.position.set(sx*(ROAD_HALF + 1.6), 3.1, 0); pil.castShadow = true; g.add(pil);
+    }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(2*(ROAD_HALF + 2.3), 1.4, 2.4), stoneMat);
+    top.position.set(0, 6.6, 0); top.castShadow = true; g.add(top);
+    g.position.set(c.x, c.y, c.z); g.rotation.y = Math.atan2(c.fwd.x, c.fwd.z);
+    scene.add(g);
+  }
 }
-const tileProto = makeTile();
-const tiles = [tileProto, tileProto.clone(), tileProto.clone()];
-tiles.forEach(t => scene.add(t));
+
+// straight: scenery tile (buildings/palms/props), cloned 3x and snapped around the player for an endless street
+let tiles = [];
+if (LINEAR){
+  const makeTile = () => {
+    const g = new THREE.Group();
+    const scen = THEME.scen;
+    for (const s of [-1, 1]){
+      let z = -TILE/2;
+      while (z < TILE/2 - 10){
+        if (scen === 'city' || scen === 'night'){
+          if (Math.random() < 0.85){
+            const w = 8 + Math.random()*10, d = 8 + Math.random()*8, h = 6 + Math.random()*28;
+            const mat = wallMats[Math.floor(Math.random()*wallMats.length)];
+            const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [mat, mat, roofMat, roofMat, mat, mat]);
+            b.position.set(s*(10.5 + w/2 + Math.random()*5), h/2, z + d/2); b.castShadow = true; g.add(b);
+          }
+          if (scen === 'city' && Math.random() < 0.55) g.add(palm(s*9.7, z + Math.random()*4));
+          z += 11 + Math.random()*8;
+        } else if (scen === 'desert'){
+          if (Math.random() < 0.6) g.add(dune(s*(30 + Math.random()*45), z));
+          if (Math.random() < 0.55) g.add(cactus(s*(10.5 + Math.random()*7), z + Math.random()*6));
+          if (Math.random() < 0.4) g.add(rock(0x9a7b52, s*(12 + Math.random()*22), z + 5));
+          z += 13 + Math.random()*10;
+        } else if (scen === 'snow'){
+          if (Math.random() < 0.85) g.add(pine(s*(10.5 + Math.random()*12), z));
+          if (Math.random() < 0.3) g.add(rock(0xcfd8e2, s*(13 + Math.random()*18), z + 5));
+          z += 11 + Math.random()*8;
+        } else {                                          // sunset coast
+          if (Math.random() < 0.75) g.add(palm(s*(10 + Math.random()*5), z));
+          if (Math.random() < 0.3) g.add(rock(0xb0a08a, s*(15 + Math.random()*20), z + 4));
+          if (Math.random() < 0.25) g.add(dune(s*(35 + Math.random()*40), z));
+          z += 12 + Math.random()*9;
+        }
+      }
+    }
+    return g;
+  };
+  const proto = makeTile();
+  tiles = [proto, proto.clone(), proto.clone()];
+  tiles.forEach(t => scene.add(t));
+}
+
+// ---------- city: the Sketchfab downtown IS the drivable map ----------
+// scale + centre the model so its LOCAL centre lands at world origin (matching cityToWorld, so the
+// routed racing line sits on real streets), then rasterise building footprints into an occupancy grid
+// so buildings block the car. Both city sub-modes (routed circuit & free-roam) use this collision.
+const CITY_MIN_Y = -0.1;                             // local floor of city.glb
+// the model's streets are one flat plane; its world height is a fixed offset of the transform, so cars
+// ride it at a constant y. (A per-cell height lookup made the camera bob and dipped tyres into kerbs.)
+const CITY_STREET_Y = -CITY_MIN_Y * CITY_SCALE;
+let cityOcc = null;                                  // {occ, res, ox, oz, nx, nz} — set when the model loads
+const cityCell = (x, z) => {
+  if (!cityOcc) return -1;
+  const ix = Math.floor((x - cityOcc.ox)/cityOcc.res), iz = Math.floor((z - cityOcc.oz)/cityOcc.res);
+  return (ix < 0 || ix >= cityOcc.nx || iz < 0 || iz >= cityOcc.nz) ? -1 : iz*cityOcc.nx + ix;
+};
+function occBlocked(x, z){ const c = cityCell(x, z); return c < 0 ? false : cityOcc.occ[c] === 1; }
+if (IS_CITY){
+  // a dark asphalt ground plane so the world isn't a void beyond the model edges
+  const gp = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), new THREE.MeshStandardMaterial({color: 0x2c2c33, roughness: 1}));
+  gp.rotation.x = -Math.PI/2; gp.position.y = -0.05; gp.receiveShadow = true; scene.add(gp);
+  gltfLoader.load('city.glb', gltf => {
+    const city = gltf.scene;
+    city.scale.setScalar(CITY_SCALE);
+    city.position.set(-CITY_LOCAL_CENTER.x*CITY_SCALE, -CITY_MIN_Y*CITY_SCALE, -CITY_LOCAL_CENTER.z*CITY_SCALE);
+    // ponytail: the model already bakes AO/shadows into its textures, so skip real-time shadow-casting
+    // for the whole 200k-tri city (halves its render cost on mobile); streets still receive the car shadows.
+    // strip the model's own parked traffic cars (WheelTex + CarTex meshes): they're modelled floating
+    // ~0.6 m above the street, clutter the racing line, and are ~78% of the model's triangles — dropping
+    // them fixes the floaters, clears the road, and makes the city far lighter on mobile.
+    const junk = [];
+    city.traverse(o => { if (o.isMesh && /wheeltex|cartex/i.test((o.material && o.material.name) || '')) junk.push(o); });
+    junk.forEach(o => o.parent && o.parent.remove(o));
+    city.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
+    scene.add(city);
+    city.updateWorldMatrix(true, true);
+    // rasterise the model into a grid (one O(verts) pass ×2): per cell, the ground surface height AND
+    // whether an obstacle stands at car height above it. Marking relative to the local ground means a
+    // tree canopy / overhead gantry (well above the street) never blocks the drivable road beneath it.
+    city.updateWorldMatrix(true, true);
+    const res = 3, half = 240, nx = Math.ceil(2*half/res), nz = nx, ox = -half, oz = -half;
+    const occ = new Uint8Array(nx*nz), grd = new Float32Array(nx*nz).fill(Infinity), v = new THREE.Vector3();
+    const cellAt = (x, z) => { const ix = Math.floor((x - ox)/res), iz = Math.floor((z - oz)/res);
+      return (ix < 0 || ix >= nx || iz < 0 || iz >= nz) ? -1 : iz*nx + ix; };
+    city.traverse(o => {                              // pass 1: per-cell ground = lowest street-level vertex,
+      if (!o.isMesh || !o.geometry.attributes.position) return;   // so pass 2 can mark walls RELATIVE to the local
+      const p = o.geometry.attributes.position;         // ground and never mistake a high roof for a wall.
+      for (let i = 0; i < p.count; i++){
+        v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+        if (v.y > 6) continue;                          // ignore roofs / upper floors
+        const c = cellAt(v.x, v.z); if (c >= 0 && v.y < grd[c]) grd[c] = v.y;
+      }
+    });
+    city.traverse(o => {                              // pass 2: mark geometry standing 0.6..4 m above the ground
+      if (!o.isMesh || !o.geometry.attributes.position) return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++){
+        v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+        const c = cellAt(v.x, v.z); if (c < 0) continue;
+        const g = grd[c]; if (v.y > g + 0.6 && v.y < g + 4) occ[c] = 1;
+      }
+    });
+    // keep only SOLID building masses: a cell survives only if it sits in a fully-occupied 2×2 block.
+    // this drops the thin street furniture (kerb fences, bollards, lamp posts, benches, tree trunks) that
+    // lines every street — those aren't walls to crash into, and marking them was scrubbing the car's
+    // speed whenever it brushed the kerb. Real buildings are solid, so they survive intact.
+    const solid = new Uint8Array(nx*nz);
+    for (let iz = 0; iz < nz - 1; iz++) for (let ix = 0; ix < nx - 1; ix++){
+      const a = iz*nx + ix;
+      if (occ[a] && occ[a+1] && occ[a+nx] && occ[a+nx+1]) solid[a] = solid[a+1] = solid[a+nx] = solid[a+nx+1] = 1;
+    }
+    cityOcc = {occ: solid, res, ox, oz, nx, nz};
+  }, undefined, e => console.error('city model load failed', e));
+}
 
 // ---------- cars: one cyberpunk GLB for every car on the grid ----------
 // each car clones the template and owns a repaintable copy of the baked texture.
@@ -577,7 +890,7 @@ function dressCar(group, name){
   tintCar(group, group.userData.tint);
 }
 
-new GLTFLoader().load('cyberpunk_car.glb', gltf => {
+gltfLoader.load('cyberpunk_car.glb', gltf => {
   const car = gltf.scene;
   car.rotation.y = Math.PI;                       // model's nose is -z; flip before measuring
   const size = new THREE.Box3().setFromObject(car).getSize(new THREE.Vector3());
@@ -624,34 +937,72 @@ scene.add(player);
 dressCar(player, playerColor);
 window.__paint = {tint: n => tintCar(player, n)};   // debug hook
 
-let px = -1.5, pz = 0, heading = 0, travel = 0, speed = 0, drifting = false, lastScreech = 0, carY = 0, carRoll = 0;
-window.dbg = () => ({px, pz, heading, speed, drifting, driftOff, boostT: +boostT.toFixed(2), boostCount, carsReady: !!glbTemplate,
+// racing-line lanes + soft barrier: much narrower on the city's tight streets than the open circuit
+const LANE_OFF = IS_CITY ? [-1.8, -0.6, 0.6, 1.8] : OFFSETS;
+const BARRIER = IS_CITY ? 12 : WALL;   // city: loose — buildings are the real wall (occupancy); this just discourages wandering onto another street
+const START_U = 0.004;
+// spawn: on the start line for a race; on a street for free-roam; on the road origin for straight
+let px, pz, heading, carY = 0, playerU = START_U, playerLap = 0, prevU = START_U;
+if (SPLINE_TRACK){
+  const startPt = sampleAt(START_U);
+  projHint = Math.floor(START_U*N);
+  px = startPt.x - startPt.side.x*1.5; pz = startPt.z - startPt.side.z*1.5;
+  heading = Math.atan2(startPt.fwd.x, startPt.fwd.z); carY = startPt.y;
+} else if (FREEROAM){
+  const a = cityToWorld(CITY_ROUTE_LOCAL[0][0], CITY_ROUTE_LOCAL[0][1]);
+  const b = cityToWorld(CITY_ROUTE_LOCAL[1][0], CITY_ROUTE_LOCAL[1][1]);
+  px = a.x; pz = a.z; heading = Math.atan2(b.x - a.x, b.z - a.z);
+} else {                                    // straight
+  px = -1.5; pz = 0; heading = 0;
+}
+let travel = heading, speed = 0, drifting = false, lastScreech = 0, carRoll = 0;
+player.position.set(px, carY, pz); player.rotation.y = heading;
+window.dbg = () => ({track: TRACK, roam: FREEROAM, px: +px.toFixed(1), pz: +pz.toFixed(1), heading: +heading.toFixed(2),
+  speed: +speed.toFixed(1), u: +playerU.toFixed(3), lap: playerLap, drifting, driftOff, boostT: +boostT.toFixed(2),
+  boostCount, carsReady: !!glbTemplate, cityOcc: !!cityOcc,
   pads: {gas: input.drive, brake: input.brake, L: keys.left, R: keys.right},
   race: {t: +raceT.toFixed(2), finished, menuOpen},
-  audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',   // console self-check: D at speed => heading down, px down
-  nextRing: (() => { const b = boosters.find(b => !b.taken && b.z > pz); return b ? {x: b.x, dz: +(b.z - pz).toFixed(0)} : null; })(),
-  rivals: rivals.map(r => ({x: +r.x.toFixed(2), z: +r.z.toFixed(2), cur: +r.cur.toFixed(2), rot: +r.mesh.rotation.y.toFixed(2)}))});
+  audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',
+  rivals: rivals.map(r => r.u != null ? {u: +r.u.toFixed(3), lap: r.lap} : {x: +r.x.toFixed(1), z: +r.z.toFixed(0)})});
 
-// ---------- race: first to the line wins ----------
-let storedLen = 1500;                       // race distance is a lobby setting
+// ---------- race: straight = first past RACE_LEN; circle/city-circuit = first to finish the laps ----------
+let storedLaps = 3;                         // lap count is a lobby setting
+try { storedLaps = parseInt(localStorage.raceLaps) || 3; } catch {}
+const LAPS = Math.min(9, Math.max(1, storedLaps));
+let storedLen = 1500;                        // straight-race distance is a lobby setting
 try { storedLen = parseInt(localStorage.raceLen) || 1500; } catch {}
 const RACE_LEN = Math.min(5000, Math.max(500, storedLen));
-let raceT = -3, finished = false, lastCnt = 99;
+let raceT = FREEROAM ? 1 : -3, finished = false, lastCnt = 99;   // free-roam skips the start countdown
 const fmtTime = t => `${Math.floor(t/60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
-const LANES = [-4.5, -1.5, 1.5, 4.5];
-const rivals = [-4.5, 1.5, 4.5].map((lx, i) => {
-  const mesh = new THREE.Group();
-  dressCar(mesh, rivalColors[i]);
-  mesh.position.set(lx, 0, 0);
-  scene.add(mesh);
-  // ponytail: rubber-band AI with human-driver traits, all rolled per race
-  const agg = 0.3 + Math.random()*0.7;    // temperament: tailgating, blocking, brake point
-  return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], x: lx, z: 0, targetX: lx,
-          base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
-          agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
-          ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
-});
+// rivals — track space (u + offset) on the spline, or world lanes (x + z) on the straight road; none in free-roam
+let rivals = [];
+if (SPLINE_TRACK){
+  rivals = [LANE_OFF[3], LANE_OFF[1], LANE_OFF[0]].map((off, i) => {
+    const mesh = new THREE.Group();
+    dressCar(mesh, rivalColors[i]);
+    const c = sampleAt(START_U);
+    mesh.position.set(c.x + c.side.x*off, c.y, c.z + c.side.z*off);
+    scene.add(mesh);
+    const agg = 0.3 + Math.random()*0.7;    // temperament: tailgating, blocking, brake point
+    return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], u: START_U, lap: 0, off, targetOff: off,
+            base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
+            agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
+            ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
+  });
+} else if (LINEAR){
+  rivals = [-4.5, 1.5, 4.5].map((lx, i) => {
+    const mesh = new THREE.Group();
+    dressCar(mesh, rivalColors[i]);
+    mesh.position.set(lx, 0, 0);
+    scene.add(mesh);
+    const agg = 0.3 + Math.random()*0.7;
+    return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], x: lx, z: 0, targetX: lx,
+            base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
+            agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
+            ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
+  });
+}
 
 // finish line: checkered stripe on the road + overhead gantry
 const checkTex = canvasTex(64, g => {
@@ -662,11 +1013,8 @@ const checkTex = canvasTex(64, g => {
 });
 checkTex.repeat.set(4, 1);
 const finishMat = new THREE.MeshBasicMaterial({map: checkTex});
-const stripe = new THREE.Mesh(new THREE.PlaneGeometry(13, 4.5), finishMat);
-stripe.rotation.x = -Math.PI/2; stripe.position.set(0, 0.08, RACE_LEN);
-scene.add(stripe);
 
-// big FINISH banner (unlit so it pops in every theme, night included)
+// the FINISH banner canvas + red/white pylon texture are shared by both finish styles
 const bannerCv = document.createElement('canvas');
 bannerCv.width = 1024; bannerCv.height = 128;
 {
@@ -680,24 +1028,41 @@ bannerCv.width = 1024; bannerCv.height = 128;
 }
 const bannerTex = new THREE.CanvasTexture(bannerCv);
 bannerTex.colorSpace = THREE.SRGBColorSpace;
-const banner = new THREE.Mesh(new THREE.BoxGeometry(15.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
-banner.position.set(0, 4.7, RACE_LEN);
-scene.add(banner);
-
-// red/white striped pylons
 const pyloCv = document.createElement('canvas');
 pyloCv.width = 8; pyloCv.height = 64;
 {
-  const g = pyloCv.getContext('2d');
-  for (let y = 0; y < 64; y += 16){ g.fillStyle = y % 32 ? '#f2f2f2' : '#d42020'; g.fillRect(0, y, 8, 16); }
+  const pg = pyloCv.getContext('2d');
+  for (let y = 0; y < 64; y += 16){ pg.fillStyle = y % 32 ? '#f2f2f2' : '#d42020'; pg.fillRect(0, y, 8, 16); }
 }
 const pyloTex = new THREE.CanvasTexture(pyloCv);
 pyloTex.colorSpace = THREE.SRGBColorSpace;
 pyloTex.wrapT = THREE.RepeatWrapping; pyloTex.repeat.set(1, 3);
-for (const x of [-7.4, 7.4]){
-  const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
-  p.position.set(x, 2.8, RACE_LEN);
-  scene.add(p);
+
+if (SPLINE_TRACK){
+  // gantry astride the start/finish line (u=0), yawed along the track: local +Z = forward, +X = car's left
+  const gate = new THREE.Group();
+  const g0 = sampleAt(0);
+  gate.position.set(g0.x, g0.y, g0.z);
+  gate.rotation.y = Math.atan2(g0.fwd.x, g0.fwd.z);
+  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(2*ROAD_HALF, 4.5), finishMat);
+  stripe.rotation.x = -Math.PI/2; stripe.position.y = 0.09; gate.add(stripe);
+  const banner = new THREE.Mesh(new THREE.BoxGeometry(2*ROAD_HALF + 1.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
+  banner.position.y = 4.7; gate.add(banner);
+  for (const x of [-(ROAD_HALF + 0.4), ROAD_HALF + 0.4]){
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
+    p.position.set(x, 2.8, 0); gate.add(p);
+  }
+  scene.add(gate);
+} else if (LINEAR){
+  // straight finish: checkered stripe + FINISH banner + pylons across the road at z = RACE_LEN
+  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(13, 4.5), finishMat);
+  stripe.rotation.x = -Math.PI/2; stripe.position.set(0, 0.08, RACE_LEN); scene.add(stripe);
+  const banner = new THREE.Mesh(new THREE.BoxGeometry(15.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
+  banner.position.set(0, 4.7, RACE_LEN); scene.add(banner);
+  for (const x of [-7.4, 7.4]){
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
+    p.position.set(x, 2.8, RACE_LEN); scene.add(p);
+  }
 }
 
 // ---------- boost pickups: floating red nitro cylinders (stocked, fired manually) ----------
@@ -721,8 +1086,7 @@ const tankBand = new THREE.CylinderGeometry(0.285, 0.285, 0.22, 14);
 const tankNeck = new THREE.CylinderGeometry(0.07, 0.07, 0.2, 8);
 const tankValve = new THREE.CylinderGeometry(0.035, 0.035, 0.24, 8);
 const boosters = [];
-for (let z = 150; z < RACE_LEN - 150; z += 160 + Math.random()*120){
-  const lane = LANES[Math.floor(Math.random()*LANES.length)];
+function dropTank(wx, wy, wz){
   const g = new THREE.Group();
   const body = new THREE.Mesh(tankBody, tankRed);
   const dome = new THREE.Mesh(tankDome, tankRed); dome.position.y = 0.5;
@@ -731,9 +1095,20 @@ for (let z = 150; z < RACE_LEN - 150; z += 160 + Math.random()*120){
   const valve = new THREE.Mesh(tankValve, tankDark); valve.rotation.z = Math.PI/2; valve.position.y = 0.97;
   g.add(body, dome, band, neck, valve);
   g.scale.setScalar(0.4);
-  g.position.set(lane, 0.55, z);
+  g.position.set(wx, wy, wz);
   scene.add(g);
-  boosters.push({g, x: lane, z, taken: false, ph: Math.random()*Math.PI*2});
+  boosters.push({g, x: wx, y: wy, z: wz, taken: false, ph: Math.random()*Math.PI*2});
+}
+if (SPLINE_TRACK){                          // nitro tanks on the racing line, around the loop
+  for (const [ru, li] of [[0.08, 1], [0.19, 2], [0.31, 3], [0.44, 1], [0.57, 2], [0.68, 0], [0.79, 2], [0.9, 1]]){
+    const c = sampleAt(ru), lane = LANE_OFF[li];
+    dropTank(c.x + c.side.x*lane, c.y + 0.55, c.z + c.side.z*lane);
+  }
+} else if (LINEAR){                         // nitro tanks down the straight, one per random lane
+  for (let z = 150; z < RACE_LEN - 150; z += 160 + Math.random()*120)
+    dropTank(STRAIGHT_LANES[Math.floor(Math.random()*STRAIGHT_LANES.length)], 0.55, z);
+} else {                                    // free-roam: a scatter along the city streets
+  for (const [lx, lz] of CITY_ROUTE_LOCAL){ const w = cityToWorld(lx, lz); dropTank(w.x, 0.55, w.z); }
 }
 
 // exhaust flames, shown while the boost is burning
@@ -890,13 +1265,68 @@ function closeMenu(){
 resumeBtn.addEventListener('click', closeMenu);
 const toMenu = () => { try { sessionStorage.removeItem('raceCfg'); } catch {} location.reload(); };
 document.getElementById('menuBtn2').addEventListener('click', toMenu);
+// ----- top-level mode selector: straight / circle / city (persisted; the chosen start reloads the world) -----
+const modesEl = document.getElementById('modes');
+const themeSect = document.getElementById('themeSect');
+const cityBtnsEl = document.getElementById('cityBtns');
+const lensSep = document.getElementById('lensSep');
+const lensEl = document.getElementById('lens');
+let selMode = ['straight', 'circle', 'city'].includes(TRACK) ? TRACK : 'straight';
+const persistMode = m => { try { localStorage.trackMode = m; } catch {} };
+
+// race-length / lap chips rebuild per mode: straight picks a distance, the loops pick a lap count
+function buildLens(m){
+  lensEl.innerHTML = '';
+  if (m === 'straight'){
+    lensSep.innerHTML = '\u{1F3C1} مسافة السباق';
+    [1000, 1500, 2000, 2500, 3000].forEach(v => {
+      const b = document.createElement('button');
+      b.textContent = `${v/1000} كم`;
+      if (v === RACE_LEN) b.classList.add('sel');
+      b.addEventListener('click', () => {
+        try { localStorage.raceLen = v; } catch {}
+        if (lobbyFresh) location.reload();
+        else lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+      });
+      lensEl.appendChild(b);
+    });
+  } else {
+    lensSep.innerHTML = '\u{1F3C1} عدد اللفات';
+    [2, 3, 4, 5].forEach(v => {
+      const b = document.createElement('button');
+      b.textContent = `${v} لفات`;
+      if (v === LAPS) b.classList.add('sel');
+      b.addEventListener('click', () => {
+        try { localStorage.raceLaps = v; } catch {}
+        if (lobbyFresh) location.reload();
+        else lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+      });
+      lensEl.appendChild(b);
+    });
+  }
+}
+function applyMode(m){
+  selMode = m; persistMode(m);
+  modesEl.querySelectorAll('button').forEach(b => b.classList.toggle('sel', b.dataset.m === m));
+  themeSect.style.display = m === 'city' ? 'none' : 'flex';
+  cityBtnsEl.style.display = m === 'city' ? 'flex' : 'none';
+  buildLens(m);
+}
+[['straight', '\u{1F6E3}\u{FE0F} مستقيم'], ['circle', '\u{1F3C1} حلبة'], ['city', '\u{1F3D9}\u{FE0F} مدينة']].forEach(([key, label]) => {
+  const b = document.createElement('button');
+  b.dataset.m = key; b.innerHTML = label;
+  b.addEventListener('click', () => applyMode(key));
+  modesEl.appendChild(b);
+});
+
 const campBtn = document.getElementById('playCampaign');
 campBtn.textContent = `▶ الحملة — التحدي ${campaignLevel}/${THEMES.length} · ${THEMES[campaignLevel-1].name}`;
 campBtn.addEventListener('click', () => {
-  try { sessionStorage.raceCfg = JSON.stringify({mode: 'campaign'}); } catch {}
+  try { sessionStorage.raceCfg = JSON.stringify({mode: 'campaign', track: selMode}); } catch {}
+  persistMode(selMode);
   initAudio();
-  if (lobbyFresh) closeMenu();             // scene is already built for the campaign level
-  else location.reload();                  // opened mid-race: start the campaign fresh
+  if (lobbyFresh && selMode === TRACK) closeMenu();   // scene already built for this mode+level
+  else location.reload();                             // mode changed or mid-race: rebuild fresh
 });
 const mapsEl = document.getElementById('maps');
 THEMES.forEach((t, i) => {
@@ -906,11 +1336,26 @@ THEMES.forEach((t, i) => {
   b.style.background = `#${t.sky.toString(16).padStart(6, '0')}`;
   b.style.color = (r*0.35 + g*0.5 + bl*0.15) > 130 ? '#1c1c22' : '#fff';
   b.addEventListener('click', () => {
-    try { sessionStorage.raceCfg = JSON.stringify({mode: 'free', lvl: i + 1}); } catch {}
+    try { sessionStorage.raceCfg = JSON.stringify({mode: 'free', lvl: i + 1, track: selMode}); } catch {}
+    persistMode(selMode);
     initAudio();
     location.reload();
   });
   mapsEl.appendChild(b);
+});
+// city has no themes: two ways to play its streets — a routed circuit or open free-roam
+[['\u{1F3C1} حلبة المدينة', false], ['\u{1F3D9}\u{FE0F} تجوّل حر', true]].forEach(([label, roam]) => {
+  const b = document.createElement('button');
+  b.innerHTML = label;
+  b.addEventListener('click', () => {
+    try {
+      sessionStorage.raceCfg = JSON.stringify({mode: 'free', track: 'city', cityRoam: roam});
+      localStorage.trackMode = 'city'; localStorage.cityRoam = roam ? '1' : '0';
+    } catch {}
+    initAudio();
+    location.reload();
+  });
+  cityBtnsEl.appendChild(b);
 });
 // car paint picker: repaints the player live, kicks any rival off the chosen color
 function recolorPlayer(name){
@@ -925,20 +1370,8 @@ function recolorPlayer(name){
     tintCar(r.mesh, free);
   }
 }
-// race distance chips: applies immediately in the lobby, next race if changed mid-race
-document.getElementById('dist').textContent = `${RACE_LEN} م`;
-const lensEl = document.getElementById('lens');
-[1000, 1500, 2000, 2500, 3000].forEach(v => {
-  const b = document.createElement('button');
-  b.textContent = `${v/1000} كم`;
-  if (v === RACE_LEN) b.classList.add('sel');
-  b.addEventListener('click', () => {
-    try { localStorage.raceLen = v; } catch {}
-    if (lobbyFresh) location.reload();
-    else lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
-  });
-  lensEl.appendChild(b);
-});
+document.getElementById('dist').textContent = LINEAR ? `${RACE_LEN} م` : (FREEROAM ? '' : `لفة 1/${LAPS}`);
+applyMode(selMode);   // sets the initial section visibility + lens for the current track
 
 const colorsEl = document.getElementById('colors');
 Object.entries(BODY_TINT).forEach(([name, rgb]) => {
@@ -1029,10 +1462,10 @@ function frame(now){
   const dt = Math.min((now - last)/1000, 0.05);
   last = now;
 
-  if (menuOpen){                    // workshop: slow showcase orbit around your car
-    const a = now/2600;
-    camera.position.set(px + Math.sin(a)*7.2, 2.1, pz + Math.cos(a)*7.2);
-    camera.lookAt(px, 0.75, pz);
+  if (menuOpen){                    // workshop / pause: slow showcase orbit around your car
+    const a = now/2600, cy = player.position.y;   // ride the car's height so pausing on the hill still frames it
+    camera.position.set(px + Math.sin(a)*7.2, cy + 2.1, pz + Math.cos(a)*7.2);
+    camera.lookAt(px, cy + 0.75, pz);
     renderer.render(scene, camera);
     return;
   }
@@ -1084,15 +1517,57 @@ function frame(now){
     if (now - lastScreech > 90){ lastScreech = now; beep(900 + Math.random()*500, 0.1, 'sawtooth', 0.07); }
   }
   updateSmoke(dt);                                        // puffs keep rising after the slide ends
-  px += Math.sin(travel)*speed*dt;
-  pz += Math.cos(travel)*speed*dt;
-  px = clamp(px, -7.5, 7.5);            // invisible walls at the sidewalk's far edge
-  // ride the surface under the wheels: flat road, up onto the raised curb, banking when straddling it
-  const gc = Math.cos(heading), track = 0.8;                // half the wheel track
-  const surf = x => Math.abs(x) > 6 ? 0.13 : 0;             // curb top sits 0.13 m above the road baseline
-  const hL = surf(px - track*gc), hR = surf(px + track*gc);
-  carY   += ((hL + hR)/2                   - carY)   * Math.min(1, 9*dt);   // centre rides the mean of both sides
-  carRoll += (Math.atan2(hR - hL, 2*track) - carRoll) * Math.min(1, 9*dt);  // bank so each side sits on its own surface
+  const dx = Math.sin(travel)*speed*dt, dz = Math.cos(travel)*speed*dt;
+  let playerOff = 0, trackY = 0, pr = null;
+  if (LINEAR){
+    px = clamp(px + dx, -7.5, 7.5);        // invisible walls at the sidewalk's far edge
+    pz += dz;
+    // ride the surface under the wheels: flat road, up onto the raised curb, banking when straddling it
+    const gc = Math.cos(heading), track = 0.8, surf = x => Math.abs(x) > 6 ? 0.13 : 0;
+    const hL = surf(px - track*gc), hR = surf(px + track*gc);
+    carY   += ((hL + hR)/2                   - carY)   * Math.min(1, 9*dt);
+    carRoll += (Math.atan2(hR - hL, 2*track) - carRoll) * Math.min(1, 9*dt);
+  } else {
+    // circle & city drive in world XZ; the city blocks buildings per-axis so you slide along walls
+    if (IS_CITY && cityOcc){
+      // per-axis so you SLIDE along a wall instead of stopping dead; only a real head-on (both axes
+      // blocked) scrubs speed — a glancing slide keeps your pace, so open street never mysteriously drags.
+      const bx = occBlocked(px + dx, pz), bz = occBlocked(px, pz + dz);
+      if (!bx) px += dx;
+      if (!bz) pz += dz;
+      if (bx && bz) speed *= 1 - 4*dt;
+    } else { px += dx; pz += dz; }
+    if (FREEROAM){                         // no racing line: flat city street, no barrier/laps
+      trackY = CITY_STREET_Y;
+      carY   += (trackY - carY)   * Math.min(1, 9*dt);
+      carRoll += (0 - carRoll) * Math.min(1, 9*dt);
+    } else {
+      // locate the car on the circuit: arc-length u, lateral offset, ground height, track frame
+      pr = project(px, pz);
+      playerOff = pr.off; trackY = IS_CITY ? CITY_STREET_Y : pr.y;   // city streets are one flat plane
+      if (!IS_CITY && Math.abs(playerOff) > BARRIER){        // circle: hard soft-wall that follows the curve
+        playerOff = clamp(playerOff, -BARRIER, BARRIER);
+        px = pr.cx + pr.side.x*playerOff; pz = pr.cz + pr.side.z*playerOff;
+        speed *= 1 - 1.5*dt;
+      } else if (IS_CITY && Math.abs(playerOff) > BARRIER){  // city: soft position clamp only (no speed scrub) — keeps you near the route
+        playerOff = clamp(playerOff, -BARRIER, BARRIER);
+        px = pr.cx + pr.side.x*playerOff; pz = pr.cz + pr.side.z*playerOff;
+      }
+      if (!IS_CITY && Math.abs(playerOff) > ROAD_HALF + CURB_W && !finished) speed *= 1 - 1.4*dt;  // off-track grass bogs down
+      // lap counter: forward wrap past the start line advances a lap
+      playerU = pr.u;
+      const du = playerU - prevU;
+      if (du < -0.5) playerLap++; else if (du > 0.5) playerLap--;
+      prevU = playerU;
+      // ride the surface: track height + curb lip under each wheel (city streets are flat)
+      const hw = 0.8;
+      const surf = IS_CITY ? () => trackY
+        : o => groundYAt(trackY, o) + (Math.abs(o) > ROAD_HALF && Math.abs(o) < ROAD_HALF + CURB_W + 0.3 ? 0.15 : 0);
+      const hL = surf(playerOff + hw), hR = surf(playerOff - hw);
+      carY   += ((hL + hR)/2                - carY)   * Math.min(1, 9*dt);
+      carRoll += (Math.atan2(hR - hL, 2*hw) - carRoll) * Math.min(1, 9*dt);
+    }
+  }
   player.position.set(px, carY, pz);
   player.rotation.set(0, heading, 0);
   player.rotateZ(carRoll);              // roll about the car's own forward axis
@@ -1101,8 +1576,8 @@ function frame(now){
   for (const bp of boosters){
     if (bp.taken) continue;
     bp.g.rotation.y += 2.2*dt;                                  // slow showcase spin
-    bp.g.position.y = 0.55 + Math.sin(now/400 + bp.ph)*0.08;    // gentle hover bob
-    if (raceT >= 0 && !finished && Math.abs(px - bp.x) < 1.5 && Math.abs(pz - bp.z) < 3){
+    bp.g.position.y = bp.y + Math.sin(now/400 + bp.ph)*0.08;    // gentle hover bob
+    if (raceT >= 0 && !finished && (px - bp.x)**2 + (pz - bp.z)**2 < 6.25){
       bp.taken = true;
       bp.g.visible = false;
       boostCount = Math.min(3, boostCount + 1);   // stock it — fire when YOU choose
@@ -1122,15 +1597,78 @@ function frame(now){
     engineGain.gain.setTargetAtTime(ev, AC.currentTime, 0.1);
   }
 
-  // rivals: human-ish drivers — reaction lag, launch delay, throttle wobble, nitro, blocking
-  if (raceT >= 0){
+  // rivals: human-ish drivers — reaction lag, launch delay, throttle wobble, nitro, blocking.
+  // spline modes race in (u along, off = lateral); the straight road races in (z along, x = lane).
+  if (!FREEROAM && raceT >= 0 && SPLINE_TRACK){
+    const field = [
+      ...rivals.map(r => ({u: r.u, off: r.off, v: r.cur, ref: r})),
+      {u: playerU, off: playerOff, v: speed, ref: null},
+    ];
+    for (const r of rivals){
+      if (raceT < r.launch) continue;   // nobody nails the green light frame-perfect
+      const ttc = (lane, back) => {
+        let best = Infinity;
+        for (const b of field){
+          if (b.ref === r || Math.abs(b.off - lane) >= 1.8) continue;
+          const dz = wrapDU(b.u, r.u)*L;      // metres ahead of r along the track
+          if (dz <= (back ? -6 : 0)) continue;
+          if (dz <= 0){ best = 0; break; }
+          best = Math.min(best, dz / Math.max(1, r.cur - b.v));
+        }
+        return best;
+      };
+      const gap = wrapDU(playerU, r.u)*L;     // + = player ahead of this rival
+      r.tNext -= dt;
+      if (r.tNext <= 0){
+        r.tNext = r.react + Math.random()*0.3;
+        if (Math.abs(r.off - r.targetOff) < 0.3){
+          if (ttc(r.targetOff) < 1.4){
+            let best = r.targetOff, bestT = ttc(r.targetOff);
+            for (const l of LANE_OFF){
+              if (Math.abs(l - r.targetOff) > 3.6 || l === r.targetOff) continue;  // adjacent lanes only
+              const t = ttc(l, true);
+              if (t > bestT + 0.6){ best = l; bestT = t; }
+            }
+            r.targetOff = best;
+          } else if (gap < 0 && gap > -28 && speed > r.cur + 2 &&
+                     Math.abs(playerOff - r.targetOff) > 1.6 && Math.random() < r.agg*0.5){
+            const l = LANE_OFF.reduce((a, b) => Math.abs(b - playerOff) < Math.abs(a - playerOff) ? b : a);
+            if (Math.abs(l - r.targetOff) <= 3.6 && ttc(l, true) > 1.2) r.targetOff = l;
+          }
+        }
+        if (r.nitro > 0 && r.boostT <= 0 && Math.abs(gap) > 20 && ttc(r.off) > 2){ r.nitro--; r.boostT = 2.5; }
+      }
+      const rc = sampleAt(r.u), rx = rc.x + rc.side.x*r.off, rz = rc.z + rc.side.z*r.off;
+      for (const bp of boosters){
+        if (!bp.taken && (rx - bp.x)**2 + (rz - bp.z)**2 < 6.25){
+          bp.taken = true; bp.g.visible = false; r.nitro = Math.min(3, r.nitro + 1);
+        }
+      }
+      r.boostT = Math.max(0, r.boostT - dt);
+      let target = r.base * clamp(1 + gap/240, 0.78, 1.22);   // rubber band: smooth, no visible gear shift
+      target *= 0.98 + 0.045*Math.sin(now/1300*r.wf + r.ph);  // nobody holds a perfect throttle
+      if (r.boostT > 0) target = Math.min(BOOST_MAX, target*1.4);
+      const want = ttc(r.off) < 0.55 + (1 - r.agg)*0.55 ? 0 : target;   // hotheads brake later
+      const prev = r.cur;
+      r.cur += (want - r.cur) * Math.min(1, 5*dt);
+      r.cur = Math.min(r.cur, prev + (r.boostT > 0 ? 16 : 10)*dt);   // car-like launch, not 0-70 in 1s
+      r.u += r.cur*dt/L;
+      if (r.u >= 1){ r.u -= 1; r.lap++; }          // crossed the line
+      r.off += clamp((r.targetOff - r.off)*3, -5, 5)*dt;   // eased lane change: darts out, settles in
+      const c = sampleAt(r.u), sway = Math.sin(now/900*r.wf + r.ph)*0.1, off = r.off + sway;
+      const curbLip = Math.abs(off) > ROAD_HALF && Math.abs(off) < ROAD_HALF + CURB_W + 0.3 ? 0.15 : 0;
+      const wxr = c.x + c.side.x*off, wzr = c.z + c.side.z*off;
+      r.mesh.position.set(wxr, (IS_CITY ? CITY_STREET_Y : c.y) + curbLip, wzr);
+      r.mesh.rotation.set(0, Math.atan2(c.fwd.x, c.fwd.z) + clamp((r.targetOff - r.off)*0.06, -0.25, 0.25), 0);
+      r.flames.visible = r.boostT > 0 && r.cur > 1;
+    }
+  } else if (raceT >= 0 && LINEAR){
     const blockers = [
       ...rivals.map(r => ({x: r.x, z: r.z, vz: r.cur, ref: r})),
       {x: px, z: pz, vz: Math.cos(travel)*speed},
     ];
     for (const r of rivals){
-      if (raceT < r.launch) continue;   // nobody nails the green light frame-perfect
-      // seconds until r reaches the nearest blocker in a lane; back=true also rejects cars alongside
+      if (raceT < r.launch) continue;
       const ttc = (lane, back) => {
         let best = Infinity;
         for (const b of blockers){
@@ -1142,85 +1680,113 @@ function frame(now){
         }
         return best;
       };
-      // decisions run on the driver's reaction clock, not every frame
       r.tNext -= dt;
       if (r.tNext <= 0){
         r.tNext = r.react + Math.random()*0.3;
-        // commit to one lane change at a time — no zigzag
         if (Math.abs(r.x - r.targetX) < 0.3){
           if (ttc(r.targetX) < 1.4){
             let best = r.targetX, bestT = ttc(r.targetX);
-            for (const l of LANES){
-              if (Math.abs(l - r.targetX) > 3.1 || l === r.targetX) continue;  // adjacent lanes only
+            for (const l of STRAIGHT_LANES){
+              if (Math.abs(l - r.targetX) > 3.1 || l === r.targetX) continue;
               const t = ttc(l, true);
               if (t > bestT + 0.6){ best = l; bestT = t; }
             }
             r.targetX = best;
           } else if (pz < r.z && r.z - pz < 28 && speed > r.cur + 2 &&
                      Math.abs(px - r.targetX) > 1.6 && Math.random() < r.agg*0.5){
-            // defend the lead: aggressive drivers drift into the charger's lane
-            const l = LANES.reduce((a, b) => Math.abs(b - px) < Math.abs(a - px) ? b : a);
+            const l = STRAIGHT_LANES.reduce((a, b) => Math.abs(b - px) < Math.abs(a - px) ? b : a);
             if (Math.abs(l - r.targetX) <= 3.1 && ttc(l, true) > 1.2) r.targetX = l;
           }
         }
-        // fire a stocked nitro when dropped and the road ahead is clear
         if (r.nitro > 0 && r.boostT <= 0 && pz - r.z > 20 && ttc(r.x) > 2){ r.nitro--; r.boostT = 2.5; }
       }
-      // grab boost rings on their line, same pickup rules as you
       for (const bp of boosters){
         if (!bp.taken && Math.abs(r.x - bp.x) < 1.5 && Math.abs(r.z - bp.z) < 3){
           bp.taken = true; bp.g.visible = false; r.nitro = Math.min(3, r.nitro + 1);
         }
       }
       r.boostT = Math.max(0, r.boostT - dt);
-      let target = r.base * clamp(1 + (pz - r.z)/240, 0.78, 1.22);   // rubber band: smooth, no visible gear shift
-      target *= 0.98 + 0.045*Math.sin(now/1300*r.wf + r.ph);         // nobody holds a perfect throttle
+      let target = r.base * clamp(1 + (pz - r.z)/240, 0.78, 1.22);
+      target *= 0.98 + 0.045*Math.sin(now/1300*r.wf + r.ph);
       if (r.boostT > 0) target = Math.min(BOOST_MAX, target*1.4);
-      const want = ttc(r.x) < 0.55 + (1 - r.agg)*0.55 ? 0 : target;  // hotheads brake later
+      const want = ttc(r.x) < 0.55 + (1 - r.agg)*0.55 ? 0 : target;
       const prev = r.cur;
       r.cur += (want - r.cur) * Math.min(1, 5*dt);
-      r.cur = Math.min(r.cur, prev + (r.boostT > 0 ? 16 : 10)*dt);   // car-like launch, not 0-70 in 1s
+      r.cur = Math.min(r.cur, prev + (r.boostT > 0 ? 16 : 10)*dt);
       r.z += r.cur * dt;
-      const dx = clamp((r.targetX - r.x)*3, -5, 5)*dt;   // eased lane change: darts out, settles in
-      r.x += dx;
-      const sway = Math.sin(now/900*r.wf + r.ph)*0.1;    // hands-on-wheel wander within the lane
-      r.mesh.position.set(r.x + sway, Math.abs(r.x) > 6 ? 0.13 : 0, r.z);   // ride the curb too if shoved onto it
-      r.mesh.rotation.y = clamp(Math.atan2(dx/dt, Math.max(r.cur, 4)), -0.25, 0.25);   // gentle lane-change tilt only
+      const dxr = clamp((r.targetX - r.x)*3, -5, 5)*dt;
+      r.x += dxr;
+      const sway = Math.sin(now/900*r.wf + r.ph)*0.1;
+      r.mesh.position.set(r.x + sway, Math.abs(r.x) > 6 ? 0.13 : 0, r.z);
+      r.mesh.rotation.y = clamp(Math.atan2(dxr/dt, Math.max(r.cur, 4)), -0.25, 0.25);
       r.flames.visible = r.boostT > 0 && r.cur > 1;
     }
   }
 
-  // player vs rivals — rear hits swap momentum, side hits grind and shove (no generic full stop)
-  for (const r of rivals){
-    const dx = px - r.x, dz = pz - r.z;
-    if (Math.abs(dx) < 1.8 && Math.abs(dz) < 4.0){
-      if (Math.abs(dz) > Math.abs(dx)*2){          // nose-to-tail: momentum moves with the hit, no bounce
-        pz += clamp(r.z + Math.sign(dz)*4.0 - pz, -14*dt, 14*dt);   // ease apart — a snap reads as bouncing off
-        if (!r.hit){
-          const closing = dz < 0 ? speed - r.cur : r.cur - speed;
-          if (closing > 0.5){                      // transfer scales with impact: tap = nudge, ram = punt
-            if (dz < 0){ speed -= closing*0.6; r.cur += closing*0.5; }  // you rammed them
-            else       { r.cur -= closing*0.6; speed += closing*0.5; }  // they rammed you
-            r.tNext = 0;                           // the driver reacts to the hit right away
-            beep(85, 0.2, 'triangle', Math.min(0.5, 0.15 + closing*0.015));
+  // player vs rivals — momentum-based: rear hits swap momentum, side hits grind & shove
+  if (SPLINE_TRACK){
+    for (const r of rivals){
+      const along = wrapDU(playerU, r.u)*L;   // + = player ahead of the rival
+      const lat = playerOff - r.off;
+      if (Math.abs(along) < 4.0 && Math.abs(lat) < 1.8){
+        if (Math.abs(along) > Math.abs(lat)*2){
+          const move = clamp(wrapDU(r.u + Math.sign(along)*4.0/L, playerU), -14*dt/L, 14*dt/L);
+          px += pr.fwd.x*move*L; pz += pr.fwd.z*move*L;
+          if (!r.hit){
+            const closing = along < 0 ? speed - r.cur : r.cur - speed;
+            if (closing > 0.5){
+              if (along < 0){ speed -= closing*0.6; r.cur += closing*0.5; }
+              else          { r.cur -= closing*0.6; speed += closing*0.5; }
+              r.tNext = 0;
+              beep(85, 0.2, 'triangle', Math.min(0.5, 0.15 + closing*0.015));
+            }
           }
+        } else {
+          const dir = Math.sign(lat || 1);
+          playerOff = clamp(playerOff + dir*6*dt, -BARRIER, BARRIER);
+          px = pr.cx + pr.side.x*playerOff; pz = pr.cz + pr.side.z*playerOff;
+          r.off = clamp(r.off - dir*6*dt, -BARRIER, BARRIER);
+          r.targetOff = LANE_OFF.reduce((a, b) => Math.abs(b - r.off) < Math.abs(a - r.off) ? b : a);
+          heading += dir*0.4*dt;
+          speed *= 1 - 0.35*dt; r.cur *= 1 - 0.35*dt;
+          if (!r.hit){ r.tNext = 0; beep(300, 0.12, 'sawtooth', 0.22); }
         }
-      } else {                                     // door-to-door: trade paint, push apart, keep racing
-        const dir = Math.sign(dx || 1);
-        px = clamp(px + dir*6*dt, -7.5, 7.5);
-        r.x = clamp(r.x - dir*6*dt, -7.5, 7.5);
-        r.targetX = LANES.reduce((a, b) => Math.abs(b - r.x) < Math.abs(a - r.x) ? b : a);
-        heading += dir*0.4*dt;                     // the knock kicks your nose off line
-        speed *= 1 - 0.35*dt; r.cur *= 1 - 0.35*dt;   // grinding scrubs speed, never parks you
-        if (!r.hit){ r.tNext = 0; beep(300, 0.12, 'sawtooth', 0.22); }
-      }
-      r.hit = true;
-    } else r.hit = false;
+        r.hit = true;
+      } else r.hit = false;
+    }
+  } else if (LINEAR){
+    for (const r of rivals){
+      const cdx = px - r.x, cdz = pz - r.z;
+      if (Math.abs(cdx) < 1.8 && Math.abs(cdz) < 4.0){
+        if (Math.abs(cdz) > Math.abs(cdx)*2){
+          pz += clamp(r.z + Math.sign(cdz)*4.0 - pz, -14*dt, 14*dt);
+          if (!r.hit){
+            const closing = cdz < 0 ? speed - r.cur : r.cur - speed;
+            if (closing > 0.5){
+              if (cdz < 0){ speed -= closing*0.6; r.cur += closing*0.5; }
+              else        { r.cur -= closing*0.6; speed += closing*0.5; }
+              r.tNext = 0;
+              beep(85, 0.2, 'triangle', Math.min(0.5, 0.15 + closing*0.015));
+            }
+          }
+        } else {
+          const dir = Math.sign(cdx || 1);
+          px = clamp(px + dir*6*dt, -7.5, 7.5);
+          r.x = clamp(r.x - dir*6*dt, -7.5, 7.5);
+          r.targetX = STRAIGHT_LANES.reduce((a, b) => Math.abs(b - r.x) < Math.abs(a - r.x) ? b : a);
+          heading += dir*0.4*dt;
+          speed *= 1 - 0.35*dt; r.cur *= 1 - 0.35*dt;
+          if (!r.hit){ r.tNext = 0; beep(300, 0.12, 'sawtooth', 0.22); }
+        }
+        r.hit = true;
+      } else r.hit = false;
+    }
   }
 
-  // finish: first across the line wins (same-frame ties favor you)
-  if (!finished){
-    if (pz >= RACE_LEN){
+  // finish: straight = first past RACE_LEN; circle/city-circuit = first to finish the laps; free-roam never ends
+  if (!finished && !FREEROAM){
+    const playerDone = LINEAR ? pz >= RACE_LEN : playerLap >= LAPS;
+    if (playerDone){
       finished = true;
       if (FREE){
         resultText.textContent = `\u{1F3C6} فزت!  ${fmtTime(raceT)}`;
@@ -1238,7 +1804,7 @@ function frame(now){
       confetti();
       winJingle();
     } else {
-      const rw = rivals.find(r => r.z >= RACE_LEN);
+      const rw = rivals.find(r => LINEAR ? r.z >= RACE_LEN : r.lap >= LAPS);
       if (rw){
         finished = true;
         resultText.textContent = `\u{1F3C1} فازت السيارة ${AR_COLOR[rw.tint] || rw.name} — حاول مجددًا!`;
@@ -1249,25 +1815,28 @@ function frame(now){
     }
   }
 
-  // endless street: snap uniform strips + reposition city tiles around player
-  const snap = Math.round(pz/TILE)*TILE;
-  grass.position.z = road.position.z = snap;
-  sidewalks.forEach(s => s.position.z = snap);
-  tiles.forEach((t, i) => t.position.z = snap + (i - 1)*TILE);
+  // straight: endless street — snap the uniform strips + city tiles around the player
+  if (LINEAR){
+    const snap = Math.round(pz/TILE)*TILE;
+    grass.position.z = straightRoad.position.z = snap;
+    sidewalks.forEach(s => s.position.z = snap);
+    tiles.forEach((t, i) => t.position.z = snap + (i - 1)*TILE);
+  }
 
   // sun follows player so shadows stay near
-  sun.position.set(px + 35, 70, pz + 25);
-  sun.target.position.set(px, 0, pz);
+  sun.position.set(px + 35, trackY + 70, pz + 25);
+  sun.target.position.set(px, trackY, pz);
 
-  // camera hangs off the direction of MOTION, so a drift shows the nose pointing into the corner
+  // camera hangs off the direction of MOTION, so a drift shows the nose pointing into the corner;
+  // its height rides the track so hills don't sink the boom underground
   const fx = Math.sin(travel), fz = Math.cos(travel);
   const target = camMode === 'rear'
-    ? new THREE.Vector3(px - fx*9.0, 3.4, pz - fz*9.0)
-    : new THREE.Vector3(px + fx*9.5, 1.5, pz + fz*9.5);   // low front cam keeps the sprite grounded
-  target.x = clamp(target.x, -9, 9);    // keep the boom out of the building row during U-turns
+    ? new THREE.Vector3(px - fx*9.0, trackY + 3.4, pz - fz*9.0)
+    : new THREE.Vector3(px + fx*9.5, trackY + 1.5, pz + fz*9.5);   // low front cam keeps the sprite grounded
+  if (LINEAR) target.x = clamp(target.x, -9, 9);   // keep the boom out of the building row during U-turns
   camera.position.lerp(target, 1 - Math.exp(-8*dt));
-  if (camMode === 'rear') camera.lookAt(px + fx*3, 1.2, pz + fz*3);
-  else camera.lookAt(px, 0.85, pz);
+  if (camMode === 'rear') camera.lookAt(px + fx*3, trackY + 1.2, pz + fz*3);
+  else camera.lookAt(px, trackY + 0.85, pz);
 
   // HUD
   const kmh = Math.round(Math.abs(speed)*3.6);
@@ -1277,9 +1846,17 @@ function frame(now){
   barsEl.classList.toggle('boost', boostT > 0);
   boostCountEl.textContent = boostCount;
   boostBtn.classList.toggle('ready', boostCount > 0);
-  if (!finished){
-    posEl.textContent = `${1 + rivals.filter(r => r.z > pz).length}/4`;
-    distEl.textContent = `${Math.max(0, Math.round(RACE_LEN - pz))} م`;
+  if (FREEROAM){
+    posEl.textContent = ''; distEl.textContent = '\u{1F3D9}\u{FE0F} تجوّل حر';
+  } else if (!finished){
+    if (LINEAR){
+      posEl.textContent = `${1 + rivals.filter(r => r.z > pz).length}/4`;
+      distEl.textContent = `${Math.max(0, Math.round(RACE_LEN - pz))} م`;
+    } else {
+      const prog = playerLap + playerU;
+      posEl.textContent = `${1 + rivals.filter(r => (r.lap + r.u) > prog).length}/4`;
+      distEl.textContent = `لفة ${Math.min(LAPS, playerLap + 1)}/${LAPS}`;
+    }
   }
 
   renderer.render(scene, camera);

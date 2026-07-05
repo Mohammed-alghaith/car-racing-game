@@ -1,5 +1,5 @@
 // لعبة ناصر — offline cache
-const CACHE = 'nasser-v4';
+const CACHE = 'nasser-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -8,10 +8,14 @@ const ASSETS = [
   './icon-512.png',
   './apple-touch-icon.png',
   './cyberpunk_car.glb',
+  './city.glb',
   './songs/ya-marhaba.m4a',
   './songs/ya-marhaba.ogg',
   'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js',
   'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js',
+  'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/DRACOLoader.js',
+  'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/KTX2Loader.js',
+  'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/meshopt_decoder.module.js',
   'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/environments/RoomEnvironment.js',
 ];
 
