@@ -27,14 +27,16 @@
   .camBtn.active{background:#2d6cdf;border-color:#fff}
   .camBtn.off{opacity:.4}
 
-  #stick{position:fixed;width:140px;height:140px;margin:-70px 0 0 -70px;border-radius:50%;
-    background:rgba(18,20,28,.35);border:2px solid rgba(255,255,255,.3);
-    display:none;pointer-events:none;z-index:2}
-  #knob{position:absolute;left:50%;top:50%;width:58px;height:58px;border-radius:50%;
+  .pad{position:absolute;display:flex;gap:14px;z-index:2}
+  #padL{left:14px;bottom:28px;flex-direction:column}
+  #padR{right:14px;bottom:28px;flex-direction:row}
+  .arw{width:70px;height:70px;border-radius:50%;color:#fff;font-size:24px;
     background:radial-gradient(circle at 35% 30%,#5a6070,#23262e);border:2px solid rgba(255,255,255,.45);
-    transform:translate(-50%,-50%);box-shadow:0 4px 12px rgba(0,0,0,.55)}
+    display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.55);
+    user-select:none;-webkit-user-select:none}
+  .arw.held{background:radial-gradient(circle at 35% 30%,#7a86a0,#3a4050);border-color:#fff;transform:scale(.94)}
 
-  #speedBox{position:absolute;left:16px;bottom:18px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+  #speedBox{position:absolute;left:104px;bottom:18px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
   #bars{display:flex;flex-direction:column-reverse;gap:3px}
   .bar{width:30px;height:8px;border-radius:2px;background:rgba(10,25,10,.55)}
   .bar.on{background:#39e14e;box-shadow:0 0 7px #39e14e}
@@ -44,7 +46,7 @@
   #hint{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);
     font:11px system-ui;color:rgba(255,255,255,.75);background:rgba(0,0,0,.35);padding:3px 10px;border-radius:8px}
 
-  #boostBtn{position:absolute;right:196px;bottom:36px;width:64px;height:64px;border-radius:50%;
+  #boostBtn{position:absolute;right:14px;bottom:116px;width:64px;height:64px;border-radius:50%;
     background:radial-gradient(circle at 35% 30%,#6b1a1a,#2c0b0b);border:2px solid #77302a;
     display:flex;align-items:center;justify-content:center;font-size:26px;opacity:.45}
   #boostBtn.ready{opacity:1;border-color:#ff8a2a;box-shadow:0 0 16px rgba(255,130,40,.75);cursor:pointer}
@@ -91,8 +93,10 @@
   /* notched phones: keep controls inside the safe area */
   @supports (padding: env(safe-area-inset-top)){
     #camBtns{top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
-    #speedBox{bottom:calc(18px + env(safe-area-inset-bottom));left:calc(16px + env(safe-area-inset-left))}
-    #boostBtn{bottom:calc(36px + env(safe-area-inset-bottom))}
+    #speedBox{bottom:calc(18px + env(safe-area-inset-bottom));left:calc(104px + env(safe-area-inset-left))}
+    #padL{bottom:calc(28px + env(safe-area-inset-bottom));left:calc(14px + env(safe-area-inset-left))}
+    #padR{bottom:calc(28px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right))}
+    #boostBtn{bottom:calc(116px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right))}
     #hint{bottom:calc(6px + env(safe-area-inset-bottom))}
     #menu{padding:calc(24px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom))}
   }
@@ -102,8 +106,11 @@
     .camBtn b{font-size:13px}
     .camBtn span{font-size:8px}
     #camBtns{width:114px;gap:8px}
-    #knob{width:50px;height:50px}
-    #boostBtn{width:54px;height:54px;font-size:21px;right:148px;bottom:26px}
+    .arw{width:56px;height:56px;font-size:19px}
+    #padL{left:10px;bottom:24px;gap:11px}
+    #padR{right:10px;bottom:24px;gap:11px}
+    #speedBox{left:78px}
+    #boostBtn{width:54px;height:54px;font-size:21px;right:12px;bottom:96px}
     .bar{width:22px;height:6px}
     #mph{font-size:12px}
     #pos{font-size:16px}
@@ -124,17 +131,16 @@
     <div class="camBtn ctl active" data-mode="rear"><b>&#x1F3CE;</b><span>خلف</span></div>
     <div class="camBtn ctl" data-mode="front"><b>&#x1F441;</b><span>أمام</span></div>
     <div class="camBtn ctl" id="stopBtn"><b>&#x23F8;</b><span>إيقاف</span></div>
-    <div class="camBtn ctl" id="restartBtn"><b>&#x21BA;</b><span>إعادة</span></div>
-    <div class="camBtn ctl" id="menuBtn"><b>&#x2630;</b><span>القائمة</span></div>
     <div class="camBtn ctl" id="sndBtn2"><b>&#x1F50A;</b><span>الصوت</span></div>
     <div class="camBtn ctl" id="musicBtn2"><b>&#x1F3B5;</b><span>الموسيقى</span></div>
   </div>
-  <div id="stick"><div id="knob"></div></div>
+  <div id="padL" class="pad"><div class="arw ctl" id="btnGas">&#x25B2;</div><div class="arw ctl" id="btnBrake">&#x25BC;</div></div>
+  <div id="padR" class="pad"><div class="arw ctl" id="btnL">&#x25C0;</div><div class="arw ctl" id="btnR">&#x25B6;</div></div>
   <div id="speedBox">
     <div id="bars"></div>
     <div id="mph">0 كم/س</div>
   </div>
-  <div id="hint">المس أي مكان وحرّك إصبعك للقيادة — انقر مرتين للتسريع &nbsp;|&nbsp; لوحة المفاتيح: W/S وA/D وB للتسريع</div>
+  <div id="hint">اليسار: &#x25B2; غاز &#x25BC; فرامل — اليمين: &#x25C0; &#x25B6; توجيه &nbsp;|&nbsp; انعطاف قوي بسرعة = انزلاق &nbsp;|&nbsp; لوحة المفاتيح: W/S وA/D وB للتسريع</div>
   <div id="boostBtn" class="ctl"><b>&#x1F525;</b><span id="boostCount">0</span></div>
   <div id="raceHud"><div id="pos">1/4</div><br><div id="dist">1500 م</div><br><div id="lvl"></div></div>
   <div id="banner">3</div>
@@ -153,7 +159,7 @@
     <div id="lens"></div>
     <div class="sep">&#x1F3A8; ورشة الطلاء &mdash; اختر لونًا</div>
     <div id="colors"></div>
-    <div class="btnRow"><button id="sndBtn"></button><button id="musicBtn"></button></div>
+    <div class="btnRow"><button id="sndBtn"></button><button id="musicBtn"></button><button id="driftBtn"></button></div>
     <div id="buildTag">v5 · Cyberpunk car by 4d_Bob (CC BY)</div>
   </div>
 </div>
@@ -193,29 +199,29 @@ let menuOpen = !raceCfg;                   // fresh visit -> main menu; restarts
 
 // ---------- sound: all synthesized, no audio files ----------
 let AC = null, engineSrc = null, engineFilter = null, engineGain = null;
-let muted = false, musicOff = false;
-try { muted = localStorage.muted === '1'; musicOff = localStorage.musicOff === '1'; } catch {}
+let muted = false, musicOff = false, driftOff = false;
+try { muted = localStorage.muted === '1'; musicOff = localStorage.musicOff === '1'; driftOff = localStorage.driftOff === '1'; } catch {}
 function initAudio(){
   if (AC) return;
   try {
     AC = new (window.AudioContext || window.webkitAudioContext)();
-    // engine = F1-style scream: a saw-rich harmonic stack over a high firing frequency,
-    // plus periodic pseudo-noise rasp AM'd by the firing cycle. Every component is an
+    // engine = smooth V8 purr: a round harmonic stack (steep rolloff kills the rasp)
+    // over a low firing frequency, with just a whisper of texture. Every component is an
     // integer-Hz sine, so the 1-second buffer loops with no seam click. Revved by playbackRate.
     const sr = AC.sampleRate;
     const len = sr;                                      // exactly 1 s — integer-Hz sines loop clean
     const buf = AC.createBuffer(1, len, sr);
     const d = buf.getChannelData(0);
-    const F0 = 100;                                      // firing fundamental at playbackRate 1
-    const ph = Array.from({length: 21}, () => Math.random()*2*Math.PI);
-    const rasp = Array.from({length: 40}, () => [700 + Math.floor(Math.random()*3300), Math.random()*2*Math.PI]);
+    const F0 = 65;                                       // firing fundamental at playbackRate 1
+    const ph = Array.from({length: 13}, () => Math.random()*2*Math.PI);
+    const rasp = Array.from({length: 16}, () => [500 + Math.floor(Math.random()*1500), Math.random()*2*Math.PI]);
     for (let i = 0; i < len; i++){
       const t = i/sr;
-      let v = 0.22*Math.sin(2*Math.PI*50*t);             // a little body under the scream
-      for (let h = 1; h <= 20; h++) v += Math.sin(2*Math.PI*F0*h*t + ph[h])/Math.pow(h, 0.85);
+      let v = 0.3*Math.sin(2*Math.PI*40*t);              // deep body under the purr
+      for (let h = 1; h <= 12; h++) v += Math.sin(2*Math.PI*F0*h*t + ph[h])/Math.pow(h, 1.4);
       let n = 0;
       for (const [f, p] of rasp) n += Math.sin(2*Math.PI*f*t + p);
-      v += n*0.02*(0.6 + 0.4*Math.sin(2*Math.PI*F0*t)); // rasp breathes with the firing cycle
+      v += n*0.006*(0.7 + 0.3*Math.sin(2*Math.PI*F0*t)); // faint texture breathing with the firing cycle
       d[i] = v;
     }
     let mx = 0;
@@ -618,9 +624,10 @@ scene.add(player);
 dressCar(player, playerColor);
 window.__paint = {tint: n => tintCar(player, n)};   // debug hook
 
-let px = -1.5, pz = 0, heading = 0, speed = 0;
-window.dbg = () => ({px, pz, heading, speed, boostT: +boostT.toFixed(2), boostCount, carsReady: !!glbTemplate,
-  stick: [+stickX.toFixed(2), +stickY.toFixed(2)],
+let px = -1.5, pz = 0, heading = 0, travel = 0, speed = 0, drifting = false, lastScreech = 0, carY = 0, carRoll = 0;
+window.dbg = () => ({px, pz, heading, speed, drifting, driftOff, boostT: +boostT.toFixed(2), boostCount, carsReady: !!glbTemplate,
+  pads: {gas: input.drive, brake: input.brake, L: keys.left, R: keys.right},
+  race: {t: +raceT.toFixed(2), finished, menuOpen},
   audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',   // console self-check: D at speed => heading down, px down
   nextRing: (() => { const b = boosters.find(b => !b.taken && b.z > pz); return b ? {x: b.x, dz: +(b.z - pz).toFixed(0)} : null; })(),
   rivals: rivals.map(r => ({x: +r.x.toFixed(2), z: +r.z.toFixed(2), cur: +r.cur.toFixed(2), rot: +r.mesh.rotation.y.toFixed(2)}))});
@@ -638,9 +645,12 @@ const rivals = [-4.5, 1.5, 4.5].map((lx, i) => {
   dressCar(mesh, rivalColors[i]);
   mesh.position.set(lx, 0, 0);
   scene.add(mesh);
-  // ponytail: rubber-band AI — base speed below player max, boosts when dropped
+  // ponytail: rubber-band AI with human-driver traits, all rolled per race
+  const agg = 0.3 + Math.random()*0.7;    // temperament: tailgating, blocking, brake point
   return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], x: lx, z: 0, targetX: lx,
-          base: MAX*(0.84 + i*0.05), cur: 0, hit: false};
+          base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
+          agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
+          ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
 });
 
 // finish line: checkered stripe on the road + overhead gantry
@@ -742,50 +752,72 @@ flames.position.set(0, 0.48, -2.15);     // clear of the tail, one tongue per ex
 flames.rotation.x = 0.24;                // kick the tips up into the chase camera's view
 flames.visible = false;
 player.add(flames);
+for (const r of rivals){ r.flames = flames.clone(); r.mesh.add(r.flames); }
+
+// tire smoke — world-space puffs left behind while drifting, the unmistakable drift tell
+const SMOKE_LIFE = 0.85;
+const smokeTex = canvasTex(64, g => {
+  const grd = g.createRadialGradient(32, 32, 1, 32, 32, 32);
+  grd.addColorStop(0,   'rgba(225,225,228,0.95)');   // dense gray core reads on desert AND night maps
+  grd.addColorStop(0.5, 'rgba(190,190,195,0.55)');
+  grd.addColorStop(1,   'rgba(190,190,195,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+});
+const smokePool = Array.from({length: 40}, () => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map: smokeTex, transparent: true, opacity: 0, depthWrite: false}));
+  s.visible = false; scene.add(s);
+  return {s, life: 0};
+});
+let smokeAcc = 0;
+function emitSmoke(x, z, dt){
+  smokeAcc += dt;
+  while (smokeAcc > 0.02){                        // ~50 puffs/sec while sliding — a thick trail
+    smokeAcc -= 0.02;
+    const p = smokePool.find(p => p.life <= 0);
+    if (!p) break;
+    p.life = SMOKE_LIFE;
+    p.vx = (Math.random() - 0.5)*2.4; p.vy = 1.4 + Math.random(); p.vz = (Math.random() - 0.5)*2.4;
+    p.s.position.set(x + (Math.random() - 0.5)*1.6, 0.3, z + (Math.random() - 0.5)*1.6);
+    p.s.scale.setScalar(1.3);
+    p.s.visible = true;
+  }
+}
+function updateSmoke(dt){
+  for (const p of smokePool){
+    if (p.life <= 0) continue;
+    p.life -= dt;
+    if (p.life <= 0){ p.s.visible = false; continue; }
+    p.s.position.x += p.vx*dt; p.s.position.y += p.vy*dt; p.s.position.z += p.vz*dt;
+    p.s.scale.addScalar(3.0*dt);                  // billows out as it rises
+    p.s.material.opacity = 0.85*(p.life/SMOKE_LIFE);   // fades over its lifetime
+  }
+}
 
 // ---------- input ----------
 const input = {drive:false, brake:false};
 const keys = {left:false, right:false};
-let keySteer = 0, stickX = 0, stickY = 0;
+let keySteer = 0;
 let camMode = 'rear';
 
-// floating joystick: touch anywhere on the road to spawn it under your finger;
-// up = gas, down = brake/reverse, sideways = analog steering. Double-tap fires the boost.
-const stickEl = document.getElementById('stick');
-const knobEl = document.getElementById('knob');
-const STICK_R = 52;
-let stickPtr = null, stickOX = 0, stickOY = 0;
-let lastTapT = 0, lastTapX = 0, lastTapY = 0;
-const gameCanvas = renderer.domElement;
-addEventListener('pointerdown', e => {
-  if (e.target !== gameCanvas) return;             // buttons and menus keep their own behavior
-  const t = performance.now();
-  if (t - lastTapT < 300 && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 80) fireBoost();
-  lastTapT = t; lastTapX = e.clientX; lastTapY = e.clientY;
-  if (stickPtr !== null) return;                   // first touch owns the stick
-  stickPtr = e.pointerId;
-  stickOX = e.clientX; stickOY = e.clientY;
-  stickEl.style.left = `${stickOX}px`;
-  stickEl.style.top = `${stickOY}px`;
-  stickEl.style.display = 'block';
-  knobEl.style.transform = 'translate(-50%, -50%)';
-});
-addEventListener('pointermove', e => {
-  if (e.pointerId !== stickPtr) return;
-  let dx = e.clientX - stickOX, dy = e.clientY - stickOY;
-  const d = Math.hypot(dx, dy);
-  if (d > STICK_R){ dx *= STICK_R/d; dy *= STICK_R/d; }
-  stickX = dx/STICK_R;
-  stickY = -dy/STICK_R;
-  knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-});
-const stickOff = e => {
-  if (e.pointerId !== stickPtr) return;
-  stickPtr = null; stickX = 0; stickY = 0;
-  stickEl.style.display = 'none';
+// two-thumb arrow pads: ▲▼ under the left thumb = gas/brake, ◀▶ under the right = steering.
+// they drive the same flags as the keyboard, so steering inherits its smoothing (multi-touch:
+// each pad owns its pointer via capture, both thumbs work at once)
+const holdPad = (id, on, off) => {
+  const el = document.getElementById(id);
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    el.classList.add('held');
+    on();
+  });
+  const release = () => { el.classList.remove('held'); off(); };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
 };
-addEventListener('pointerup', stickOff);
-addEventListener('pointercancel', stickOff);
+holdPad('btnGas',   () => input.drive = true,  () => input.drive = false);
+holdPad('btnBrake', () => input.brake = true,  () => input.brake = false);
+holdPad('btnL',     () => keys.left  = true,   () => keys.left  = false);
+holdPad('btnR',     () => keys.right = true,   () => keys.right = false);
 
 document.querySelectorAll('.camBtn[data-mode]').forEach(b => b.addEventListener('pointerdown', () => {
   camMode = b.dataset.mode;
@@ -857,7 +889,6 @@ function closeMenu(){
 }
 resumeBtn.addEventListener('click', closeMenu);
 const toMenu = () => { try { sessionStorage.removeItem('raceCfg'); } catch {} location.reload(); };
-document.getElementById('menuBtn').addEventListener('pointerdown', openMenu);
 document.getElementById('menuBtn2').addEventListener('click', toMenu);
 const campBtn = document.getElementById('playCampaign');
 campBtn.textContent = `▶ الحملة — التحدي ${campaignLevel}/${THEMES.length} · ${THEMES[campaignLevel-1].name}`;
@@ -949,8 +980,18 @@ function toggleMusic(){
   if (musicGain) musicGain.gain.setTargetAtTime(musicOff ? 0 : 0.32, AC.currentTime, 0.05);
   syncAudioUI();
 }
+const driftBtn = document.getElementById('driftBtn');
+const driftLabel = () => driftBtn.textContent = driftOff ? '\u{1F4A8} الانزلاق متوقف' : '\u{1F4A8} الانزلاق يعمل';
+driftLabel();
+function toggleDrift(){
+  driftOff = !driftOff;
+  try { localStorage.driftOff = driftOff ? '1' : '0'; } catch {}
+  if (driftOff) drifting = false;      // drop any active slide the instant it's switched off
+  driftLabel();
+}
 sndBtn.addEventListener('click', toggleSound);
 musicBtn.addEventListener('click', toggleMusic);
+driftBtn.addEventListener('click', toggleDrift);
 sndBtn2.addEventListener('pointerdown', toggleSound);
 musicBtn2.addEventListener('pointerdown', toggleMusic);
 syncAudioUI();
@@ -962,13 +1003,8 @@ function setLobby(on){
 }
 if (!menuOpen) menuEl.style.display = 'none';
 setLobby(menuOpen);
-document.getElementById('restartBtn').addEventListener('pointerdown', () => location.reload());
-let paused = false;
-const stopBtn = document.getElementById('stopBtn');
-stopBtn.addEventListener('pointerdown', () => {
-  paused = !paused;
-  stopBtn.classList.toggle('active', paused);
-});
+// pause = the menu: it freezes the race and already offers resume/restart/lobby
+document.getElementById('stopBtn').addEventListener('pointerdown', openMenu);
 
 function confetti(){
   const colors = ['#ffd23f', '#ff5252', '#4dd162', '#42a5f5', '#ab47bc', '#fff'];
@@ -1000,17 +1036,10 @@ function frame(now){
     renderer.render(scene, camera);
     return;
   }
-  if (paused){                      // race clock, cars, and physics all hold still
-    bannerEl.style.display = 'block';
-    bannerEl.textContent = 'إيقاف مؤقت';
-    renderer.render(scene, camera);
-    return;
-  }
-
-  // steering (joystick x + keyboard blended)
+  // steering (arrow pads and keyboard share the flags; smoothed toward the target)
   const kt = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   keySteer += (kt - keySteer) * Math.min(1, 6*dt);
-  const steer = clamp(stickX + keySteer, -1, 1);
+  const steer = keySteer;
 
   // race clock: countdown locks inputs, then GO
   raceT += dt;
@@ -1020,12 +1049,18 @@ function frame(now){
     bannerEl.textContent = cnt > 0 ? cnt : 'انطلق!';
     if (cnt !== lastCnt){ lastCnt = cnt; beep(cnt > 0 ? 440 : 880, cnt > 0 ? 0.12 : 0.4, 'square', 0.15); }
   } else bannerEl.style.display = 'none';
-  const drv = (input.drive || stickY > 0.2) && raceT >= 0 && !finished;
-  const brk = (input.brake || stickY < -0.25) && raceT >= 0 && !finished;
+  const drv = input.drive && raceT >= 0 && !finished;
+  const brk = input.brake && raceT >= 0 && !finished;
 
-  // longitudinal — ponytail: arcadey point-mass, no tire model
+  // drift: crank the wheel hard at speed OR brake+steer — tail steps out. Ease off (or slow) to grip again.
+  const hardTurn = Math.abs(steer) > 0.7 && speed > 20;                 // committed hard turn slides on its own
+  const brakeSlide = brk && Math.abs(steer) > 0.3 && speed > 12;        // handbrake-style tighter initiation
+  if (!driftOff && (hardTurn || brakeSlide)) drifting = true;           // menu toggle gates the whole mechanic
+  if (Math.abs(steer) < 0.15 || speed < 6) drifting = false;
+
+  // longitudinal — ponytail: arcadey point-mass, no tire model (brake is a drift tool mid-slide)
   if (brk){
-    speed = speed > 0.3 ? Math.max(0, speed - 24*dt) : Math.max(-9, speed - 7*dt);
+    speed = speed > 0.3 ? Math.max(0, speed - (drifting ? 5 : 24)*dt) : Math.max(-9, speed - 7*dt);
   }
   const maxNow = boostT > 0 ? BOOST_MAX : MAX;
   if (drv) speed = Math.min(maxNow, speed + (speed < 0 ? 18 : 11*(1 - speed/(maxNow+2)))*dt);
@@ -1038,13 +1073,29 @@ function frame(now){
   if (finished) speed = Math.max(0, speed - 12*dt);   // coast to a stop past the line
 
   // steer>0 = right turn; facing +z the car's right is -x (right-hand traffic layout), so heading decreases
-  const sa = 0.55*steer / (1 + Math.abs(speed)*0.05);
+  const sa = 0.55*steer / (1 + Math.abs(speed)*0.05) * (drifting ? 1.5 : 1);
   heading -= (speed/2.6) * Math.tan(sa) * dt;
-  px += Math.sin(heading)*speed*dt;
-  pz += Math.cos(heading)*speed*dt;
-  px = clamp(px, -7.5, 7.5);            // ponytail: invisible walls at sidewalk edge
-  player.position.set(px, 0, pz);
-  player.rotation.y = heading;
+  // the wheels grip along `travel`: it chases heading fast on tarmac, lazily mid-drift
+  travel += (heading - travel) * Math.min(1, (drifting ? 2.2 : 12)*dt);
+  travel = clamp(travel, heading - 0.6, heading + 0.6);   // slip cap — slides, never spins out
+  if (drifting){
+    speed *= 1 - 0.25*dt;                                 // scrubbing tires cost a little pace
+    emitSmoke(px - Math.sin(heading)*2, pz - Math.cos(heading)*2, dt);   // puffs off the rear tires
+    if (now - lastScreech > 90){ lastScreech = now; beep(900 + Math.random()*500, 0.1, 'sawtooth', 0.07); }
+  }
+  updateSmoke(dt);                                        // puffs keep rising after the slide ends
+  px += Math.sin(travel)*speed*dt;
+  pz += Math.cos(travel)*speed*dt;
+  px = clamp(px, -7.5, 7.5);            // invisible walls at the sidewalk's far edge
+  // ride the surface under the wheels: flat road, up onto the raised curb, banking when straddling it
+  const gc = Math.cos(heading), track = 0.8;                // half the wheel track
+  const surf = x => Math.abs(x) > 6 ? 0.13 : 0;             // curb top sits 0.13 m above the road baseline
+  const hL = surf(px - track*gc), hR = surf(px + track*gc);
+  carY   += ((hL + hR)/2                   - carY)   * Math.min(1, 9*dt);   // centre rides the mean of both sides
+  carRoll += (Math.atan2(hR - hL, 2*track) - carRoll) * Math.min(1, 9*dt);  // bank so each side sits on its own surface
+  player.position.set(px, carY, pz);
+  player.rotation.set(0, heading, 0);
+  player.rotateZ(carRoll);              // roll about the car's own forward axis
 
   // boost rings + exhaust flames
   for (const bp of boosters){
@@ -1065,19 +1116,20 @@ function frame(now){
   // engine revs with speed: playback rate = RPM, filter opens under load, snarls on boost
   if (AC && !muted && engineSrc){
     const rev = Math.abs(speed)/MAX;
-    engineSrc.playbackRate.setTargetAtTime(0.6 + rev*1.9 + (boostT > 0 ? 0.35 : 0), AC.currentTime, 0.08);
-    engineFilter.frequency.setTargetAtTime(700 + rev*5200 + (boostT > 0 ? 900 : 0), AC.currentTime, 0.1);
+    engineSrc.playbackRate.setTargetAtTime(0.7 + rev*1.5 + (boostT > 0 ? 0.25 : 0), AC.currentTime, 0.12);
+    engineFilter.frequency.setTargetAtTime(500 + rev*2600 + (boostT > 0 ? 600 : 0), AC.currentTime, 0.15);
     const ev = finished ? 0.05 : (Math.abs(speed) > 0.5 || drv ? 0.2 + rev*0.22 : 0.11);
     engineGain.gain.setTargetAtTime(ev, AC.currentTime, 0.1);
   }
 
-  // rivals: rubber-band speed, time-to-contact lane picking (no traffic — just each other and you)
+  // rivals: human-ish drivers — reaction lag, launch delay, throttle wobble, nitro, blocking
   if (raceT >= 0){
     const blockers = [
       ...rivals.map(r => ({x: r.x, z: r.z, vz: r.cur, ref: r})),
-      {x: px, z: pz, vz: Math.cos(heading)*speed},
+      {x: px, z: pz, vz: Math.cos(travel)*speed},
     ];
     for (const r of rivals){
+      if (raceT < r.launch) continue;   // nobody nails the green light frame-perfect
       // seconds until r reaches the nearest blocker in a lane; back=true also rejects cars alongside
       const ttc = (lane, back) => {
         let best = Infinity;
@@ -1090,39 +1142,79 @@ function frame(now){
         }
         return best;
       };
-      // commit to one lane change at a time — no zigzag
-      if (Math.abs(r.x - r.targetX) < 0.3 && ttc(r.targetX) < 1.4){
-        let best = r.targetX, bestT = ttc(r.targetX);
-        for (const l of LANES){
-          if (Math.abs(l - r.targetX) > 3.1 || l === r.targetX) continue;  // adjacent lanes only
-          const t = ttc(l, true);
-          if (t > bestT + 0.6){ best = l; bestT = t; }
+      // decisions run on the driver's reaction clock, not every frame
+      r.tNext -= dt;
+      if (r.tNext <= 0){
+        r.tNext = r.react + Math.random()*0.3;
+        // commit to one lane change at a time — no zigzag
+        if (Math.abs(r.x - r.targetX) < 0.3){
+          if (ttc(r.targetX) < 1.4){
+            let best = r.targetX, bestT = ttc(r.targetX);
+            for (const l of LANES){
+              if (Math.abs(l - r.targetX) > 3.1 || l === r.targetX) continue;  // adjacent lanes only
+              const t = ttc(l, true);
+              if (t > bestT + 0.6){ best = l; bestT = t; }
+            }
+            r.targetX = best;
+          } else if (pz < r.z && r.z - pz < 28 && speed > r.cur + 2 &&
+                     Math.abs(px - r.targetX) > 1.6 && Math.random() < r.agg*0.5){
+            // defend the lead: aggressive drivers drift into the charger's lane
+            const l = LANES.reduce((a, b) => Math.abs(b - px) < Math.abs(a - px) ? b : a);
+            if (Math.abs(l - r.targetX) <= 3.1 && ttc(l, true) > 1.2) r.targetX = l;
+          }
         }
-        r.targetX = best;
+        // fire a stocked nitro when dropped and the road ahead is clear
+        if (r.nitro > 0 && r.boostT <= 0 && pz - r.z > 20 && ttc(r.x) > 2){ r.nitro--; r.boostT = 2.5; }
       }
-      let target = r.base;
-      const gap = pz - r.z;
-      if (gap > 60) target = Math.min(MAX + 2, r.base*1.25);   // rubber band: never far behind, beatable ahead
-      else if (gap < -80) target = r.base*0.75;
-      const want = ttc(r.x) < 0.9 ? 0 : target;
+      // grab boost rings on their line, same pickup rules as you
+      for (const bp of boosters){
+        if (!bp.taken && Math.abs(r.x - bp.x) < 1.5 && Math.abs(r.z - bp.z) < 3){
+          bp.taken = true; bp.g.visible = false; r.nitro = Math.min(3, r.nitro + 1);
+        }
+      }
+      r.boostT = Math.max(0, r.boostT - dt);
+      let target = r.base * clamp(1 + (pz - r.z)/240, 0.78, 1.22);   // rubber band: smooth, no visible gear shift
+      target *= 0.98 + 0.045*Math.sin(now/1300*r.wf + r.ph);         // nobody holds a perfect throttle
+      if (r.boostT > 0) target = Math.min(BOOST_MAX, target*1.4);
+      const want = ttc(r.x) < 0.55 + (1 - r.agg)*0.55 ? 0 : target;  // hotheads brake later
       const prev = r.cur;
       r.cur += (want - r.cur) * Math.min(1, 5*dt);
-      r.cur = Math.min(r.cur, prev + 10*dt);            // car-like launch, not 0-70 in 1s
+      r.cur = Math.min(r.cur, prev + (r.boostT > 0 ? 16 : 10)*dt);   // car-like launch, not 0-70 in 1s
       r.z += r.cur * dt;
-      const dx = clamp(r.targetX - r.x, -5*dt, 5*dt);
+      const dx = clamp((r.targetX - r.x)*3, -5, 5)*dt;   // eased lane change: darts out, settles in
       r.x += dx;
-      r.mesh.position.set(r.x, 0, r.z);
+      const sway = Math.sin(now/900*r.wf + r.ph)*0.1;    // hands-on-wheel wander within the lane
+      r.mesh.position.set(r.x + sway, Math.abs(r.x) > 6 ? 0.13 : 0, r.z);   // ride the curb too if shoved onto it
       r.mesh.rotation.y = clamp(Math.atan2(dx/dt, Math.max(r.cur, 4)), -0.25, 0.25);   // gentle lane-change tilt only
+      r.flames.visible = r.boostT > 0 && r.cur > 1;
     }
   }
 
-  // player vs rivals — push-out every frame, speed penalty once per contact
+  // player vs rivals — rear hits swap momentum, side hits grind and shove (no generic full stop)
   for (const r of rivals){
     const dx = px - r.x, dz = pz - r.z;
     if (Math.abs(dx) < 1.8 && Math.abs(dz) < 4.0){
-      if (Math.abs(dz) > Math.abs(dx)*2) pz = r.z + Math.sign(dz)*4.0;
-      else px = clamp(r.x + Math.sign(dx || 1)*1.9, -7.5, 7.5);
-      if (!r.hit){ speed *= 0.5; r.cur *= 0.5; r.hit = true; beep(85, 0.2, 'triangle', 0.4); }
+      if (Math.abs(dz) > Math.abs(dx)*2){          // nose-to-tail: momentum moves with the hit, no bounce
+        pz += clamp(r.z + Math.sign(dz)*4.0 - pz, -14*dt, 14*dt);   // ease apart — a snap reads as bouncing off
+        if (!r.hit){
+          const closing = dz < 0 ? speed - r.cur : r.cur - speed;
+          if (closing > 0.5){                      // transfer scales with impact: tap = nudge, ram = punt
+            if (dz < 0){ speed -= closing*0.6; r.cur += closing*0.5; }  // you rammed them
+            else       { r.cur -= closing*0.6; speed += closing*0.5; }  // they rammed you
+            r.tNext = 0;                           // the driver reacts to the hit right away
+            beep(85, 0.2, 'triangle', Math.min(0.5, 0.15 + closing*0.015));
+          }
+        }
+      } else {                                     // door-to-door: trade paint, push apart, keep racing
+        const dir = Math.sign(dx || 1);
+        px = clamp(px + dir*6*dt, -7.5, 7.5);
+        r.x = clamp(r.x - dir*6*dt, -7.5, 7.5);
+        r.targetX = LANES.reduce((a, b) => Math.abs(b - r.x) < Math.abs(a - r.x) ? b : a);
+        heading += dir*0.4*dt;                     // the knock kicks your nose off line
+        speed *= 1 - 0.35*dt; r.cur *= 1 - 0.35*dt;   // grinding scrubs speed, never parks you
+        if (!r.hit){ r.tNext = 0; beep(300, 0.12, 'sawtooth', 0.22); }
+      }
+      r.hit = true;
     } else r.hit = false;
   }
 
@@ -1167,8 +1259,8 @@ function frame(now){
   sun.position.set(px + 35, 70, pz + 25);
   sun.target.position.set(px, 0, pz);
 
-  // camera
-  const fx = Math.sin(heading), fz = Math.cos(heading);
+  // camera hangs off the direction of MOTION, so a drift shows the nose pointing into the corner
+  const fx = Math.sin(travel), fz = Math.cos(travel);
   const target = camMode === 'rear'
     ? new THREE.Vector3(px - fx*9.0, 3.4, pz - fz*9.0)
     : new THREE.Vector3(px + fx*9.5, 1.5, pz + fz*9.5);   // low front cam keeps the sprite grounded
