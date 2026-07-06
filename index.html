@@ -1042,12 +1042,23 @@ window.__paint = {tint: n => tintCar(player, n)};   // debug hook
 const LANE_OFF = IS_CITY ? [-1.8, -0.6, 0.6, 1.8] : OFFSETS;
 const BARRIER = IS_CITY ? 12 : WALL;   // city: loose — buildings are the real wall (occupancy); this just discourages wandering onto another street
 const START_U = 0.004;
+// starting grid for the loop races (circle & city): 2 columns (±GRID_LANE) x 2 rows (GRID_ROW behind the
+// front), staggered so no two cars ever overlap. Player takes pole (front-left); the 3 rivals fill the
+// other slots. Row gap is expressed in track-u (metres / total length); the back row wraps to just behind
+// the start line, which sampleAt/wrapDU handle and which only lap-counts once u actually reaches 1.
+const GRID_LANE = 2.5, GRID_ROW = SPLINE_TRACK ? 7 / L : 0;
+const START_GRID = [
+  {off: -GRID_LANE, du: 0},          // pole — player, front-left
+  {off:  GRID_LANE, du: 0},          // front-right
+  {off: -GRID_LANE, du: -GRID_ROW},  // back-left
+  {off:  GRID_LANE, du: -GRID_ROW},  // back-right
+];
 // spawn: on the start line for a race; on a street for free-roam; on the road origin for straight
 let px, pz, heading, carY = 0, playerU = START_U, playerLap = 0, prevU = START_U;
 if (SPLINE_TRACK){
   const startPt = sampleAt(START_U);
   projHint = Math.floor(START_U*N);
-  px = startPt.x - startPt.side.x*1.5; pz = startPt.z - startPt.side.z*1.5;
+  px = startPt.x + startPt.side.x*START_GRID[0].off; pz = startPt.z + startPt.side.z*START_GRID[0].off;
   heading = Math.atan2(startPt.fwd.x, startPt.fwd.z); carY = startPt.y;
 } else if (FREEROAM){
   const a = cityToWorld(CITY_ROUTE_LOCAL[0][0], CITY_ROUTE_LOCAL[0][1]);
@@ -1080,14 +1091,15 @@ const fmtTime = t => `${Math.floor(t/60)}:${(t % 60).toFixed(1).padStart(4, '0')
 // rivals — track space (u + offset) on the spline, or world lanes (x + z) on the straight road; none in free-roam
 let rivals = [];
 if (SPLINE_TRACK){
-  rivals = [LANE_OFF[3], LANE_OFF[1], LANE_OFF[0]].map((off, i) => {
+  rivals = [1, 2, 3].map((gi, i) => {
+    const g = START_GRID[gi], off = g.off, u = START_U + g.du;
     const mesh = new THREE.Group();
     dressCar(mesh, rivalColors[i]);
-    const c = sampleAt(START_U);
+    const c = sampleAt(u);
     mesh.position.set(c.x + c.side.x*off, c.y, c.z + c.side.z*off);
     scene.add(mesh);
     const agg = 0.3 + Math.random()*0.7;    // temperament: tailgating, blocking, brake point
-    return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], u: START_U, lap: 0, off, targetOff: off,
+    return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], u, lap: 0, off, targetOff: off,
             base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
             agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
             ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
