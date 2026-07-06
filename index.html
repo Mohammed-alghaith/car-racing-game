@@ -1568,7 +1568,10 @@ function frame(now){
     if (IS_CITY && cityOcc){
       // per-axis so you SLIDE along a wall instead of stopping dead; only a real head-on (both axes
       // blocked) scrubs speed — a glancing slide keeps your pace, so open street never mysteriously drags.
-      const bx = occBlocked(px + dx, pz), bz = occBlocked(px, pz + dz);
+      let bx = occBlocked(px + dx, pz), bz = occBlocked(px, pz + dz);
+      // corner guard: if both axis cells look open but the DIAGONAL destination is solid (a convex building
+      // corner), block the smaller move so the car slides along the corner instead of clipping through it.
+      if (!bx && !bz && occBlocked(px + dx, pz + dz)){ if (Math.abs(dx) < Math.abs(dz)) bx = true; else bz = true; }
       if (!bx) px += dx;
       if (!bz) pz += dz;
       if (bx && bz) speed *= 1 - 4*dt;
