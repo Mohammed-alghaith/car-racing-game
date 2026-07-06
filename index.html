@@ -508,7 +508,7 @@ const cityToWorld = (lx, lz, ly = 0) => new THREE.Vector3(
 // clockwise loop, A*-routed through the model's streets (clearance-weighted so it hugs street centres).
 // generated once against the in-game occupancy grid at CITY_SCALE; every point is verified clear of buildings.
 const CITY_ROUTE_LOCAL = [
-  [46.6,-44.4],[46.6,-35.3],[48.4,-26.3],[48.4,-17.2],[50.2,-8.1],[46,-8.1],[45,1],[45,10.1],[47,19.2],[52.1,28.3],[44.8,37.4],[44.8,46.5],
+  [46.6,-44.4],[46.6,-35.3],[48.4,-26.3],[48.4,-17.2],[50.2,-8.1],[46,-8.1],[45,1],[45,10.1],[47,19.2],[48,28.3],[44.8,37.4],[44.8,46.5],
   [41.2,51.9],[32.1,51.9],[23,51.9],[13.9,50.1],[4.8,50.1],[-4.3,50.1],[-13.4,48.3],[-22.5,44.7],[-31.6,42.8],[-40.7,39.2],[-44.3,30.1],
   [-44.3,21],[-46.1,11.9],[-47.9,2.8],[-46.1,-6.3],[-42.5,-15.3],[-44.3,-24.4],[-44.3,-33.5],[-44.3,-42.6],
   [-37,-44.4],[-27.9,-44.4],[-18.8,-44.4],[-9.8,-44.4],[-0.7,-46.3],[6.6,-44.4],[13.9,-44.4],[23,-44.4],[32.1,-44.4],[41.2,-44.4],
@@ -831,8 +831,9 @@ if (IS_CITY){
     const filled = new Uint8Array(nx*nz);
     for (let c = 0; c < nx*nz; c++) filled[c] = open[c] ? 0 : 1;
     // restore STREET-FURNITURE collisions: the footprint pass only solidifies buildings, so lamp posts,
-    // fences, signs and hydrants stopped blocking the car. Re-add the original height-band scan — mark any
-    // cell holding geometry ~0.6–4 m above its local ground — as a UNION on top of the solid buildings.
+    // fences, bins and signs stopped blocking the car. Mark any cell where mesh EDGES pass through the car-
+    // height band (~0.6..4 m above local ground) as a UNION on top of the solid buildings. Edge-walking (not
+    // per-vertex) is what catches tall thin street lights, whose only vertices are the base and the lamp head.
     // (Banded relative to local ground, so overhead gantries and tree canopies never block the street below.)
     // Run AFTER the flood so a thin line of furniture can never seal off a drivable street.
     const grd = new Float32Array(nx*nz).fill(Infinity);
@@ -842,12 +843,21 @@ if (IS_CITY){
       for (let i = 0; i < p.count; i++){ v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
         if (v.y > 6) continue; const c = cellAt(v.x, v.z); if (c >= 0 && v.y < grd[c]) grd[c] = v.y; }
     });
-    city.traverse(o => {                              // pass B: mark geometry standing 0.6..4 m above that ground
-      if (!o.isMesh || !o.geometry.attributes.position) return;
-      const p = o.geometry.attributes.position;
-      for (let i = 0; i < p.count; i++){ v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
-        const c = cellAt(v.x, v.z); if (c < 0) continue; const g = grd[c];
-        if (v.y > g + 0.6 && v.y < g + 4) filled[c] = 1; }
+    city.traverse(o => {                              // pass B: mark cells where a mesh EDGE passes through the
+      if (!o.isMesh || !o.geometry.attributes.position) return;   // 0.6..4 m car-height band above local ground.
+      if (BUILDING_RE.test((o.material && o.material.name) || '')) return;   // buildings already solid (footprint)
+      const p = o.geometry.attributes.position, idx = o.geometry.index;     // Walking EDGES (not just vertices) is
+      const wp = new Float32Array(p.count*3);                                // what catches tall thin STREET LIGHTS:
+      for (let i = 0; i < p.count; i++){ v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); wp[i*3]=v.x; wp[i*3+1]=v.y; wp[i*3+2]=v.z; }
+      const edge = (a, b) => {                          // a lamp post is a cylinder with verts only at its base and
+        const ax=wp[a*3], ay=wp[a*3+1], az=wp[a*3+2], bx=wp[b*3], by=wp[b*3+1], bz=wp[b*3+2];   // lamp head — nothing
+        const steps = Math.max(1, Math.ceil(Math.max(Math.hypot(bx-ax, bz-az), Math.abs(by-ay))/(res*0.5)));   // at car
+        for (let s = 0; s <= steps; s++){ const f = s/steps, x = ax+(bx-ax)*f, y = ay+(by-ay)*f, z = az+(bz-az)*f;   // height,
+          const c = cellAt(x, z); if (c < 0) continue; const g = grd[c]; if (y > g + 0.6 && y < g + 4) filled[c] = 1; }   // so the
+      };                                                                                          // vertical pole edge is what marks its footprint.
+      const T = (a,b,c) => { edge(a,b); edge(b,c); edge(c,a); };
+      if (idx){ for (let k = 0; k < idx.count; k += 3) T(idx.getX(k), idx.getX(k+1), idx.getX(k+2)); }
+      else { for (let k = 0; k < p.count; k += 3) T(k, k+1, k+2); }
     });
     cityOcc = {occ: filled, res, ox, oz, nx, nz};
   }, undefined, e => console.error('city model load failed', e));
