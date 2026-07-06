@@ -508,7 +508,7 @@ const cityToWorld = (lx, lz, ly = 0) => new THREE.Vector3(
 // clockwise loop, A*-routed through the model's streets (clearance-weighted so it hugs street centres).
 // generated once against the in-game occupancy grid at CITY_SCALE; every point is verified clear of buildings.
 const CITY_ROUTE_LOCAL = [
-  [46.6,-44.4],[46.6,-35.3],[48.4,-26.3],[48.4,-17.2],[50.2,-8.1],[59.3,-8.1],[61.2,1],[61.2,10.1],[57.5,19.2],[52.1,28.3],[44.8,37.4],[44.8,46.5],
+  [46.6,-44.4],[46.6,-35.3],[48.4,-26.3],[48.4,-17.2],[50.2,-8.1],[46,-8.1],[45,1],[45,10.1],[47,19.2],[52.1,28.3],[44.8,37.4],[44.8,46.5],
   [41.2,51.9],[32.1,51.9],[23,51.9],[13.9,50.1],[4.8,50.1],[-4.3,50.1],[-13.4,48.3],[-22.5,44.7],[-31.6,42.8],[-40.7,39.2],[-44.3,30.1],
   [-44.3,21],[-46.1,11.9],[-47.9,2.8],[-46.1,-6.3],[-42.5,-15.3],[-44.3,-24.4],[-44.3,-33.5],[-44.3,-42.6],
   [-37,-44.4],[-27.9,-44.4],[-18.8,-44.4],[-9.8,-44.4],[-0.7,-46.3],[6.6,-44.4],[13.9,-44.4],[23,-44.4],[32.1,-44.4],[41.2,-44.4],
@@ -778,31 +778,40 @@ if (IS_CITY){
     city.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
     scene.add(city);
     city.updateWorldMatrix(true, true);
-    // rasterise the model into a grid (one O(verts) pass ×2): per cell, the ground surface height AND
-    // whether an obstacle stands at car height above it. Marking relative to the local ground means a
-    // tree canopy / overhead gantry (well above the street) never blocks the drivable road beneath it.
-    city.updateWorldMatrix(true, true);
+    // rasterise BUILDING FOOTPRINTS into the grid: for each building mesh, mark every cell its triangles'
+    // (x,z) projection covers. Roof triangles are horizontal, so filling their footprint solidifies each
+    // building; wall/facade triangles are near-vertical (near-degenerate in XZ), so we also walk their edges
+    // to lay a continuous, gap-free wall line. (The old per-vertex height-band scan left 1-cell holes in the
+    // thin hollow-shell walls, and the flood leaked through them into every interior — the car drove in.)
+    // Streets/sidewalks/curbs/street-furniture/trees are NOT building meshes, so the road network stays open.
+    // Buildings are identified by material name — same tactic as the traffic-car strip above.
     const res = 3, half = 240, nx = Math.ceil(2*half/res), nz = nx, ox = -half, oz = -half;
-    const occ = new Uint8Array(nx*nz), grd = new Float32Array(nx*nz).fill(Infinity), v = new THREE.Vector3();
+    const occ = new Uint8Array(nx*nz), v = new THREE.Vector3();
     const cellAt = (x, z) => { const ix = Math.floor((x - ox)/res), iz = Math.floor((z - oz)/res);
       return (ix < 0 || ix >= nx || iz < 0 || iz >= nz) ? -1 : iz*nx + ix; };
-    city.traverse(o => {                              // pass 1: per-cell ground = lowest street-level vertex,
-      if (!o.isMesh || !o.geometry.attributes.position) return;   // so pass 2 can mark walls RELATIVE to the local
-      const p = o.geometry.attributes.position;         // ground and never mistake a high roof for a wall.
-      for (let i = 0; i < p.count; i++){
-        v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
-        if (v.y > 6) continue;                          // ignore roofs / upper floors
-        const c = cellAt(v.x, v.z); if (c >= 0 && v.y < grd[c]) grd[c] = v.y;
+    const BUILDING_RE = /facadeswalls|us_doors|brick_wall|genroof|textured_metal/i;
+    const markTri = (ax, az, bx, bz, cx, cz) => {
+      let i0 = Math.floor((Math.min(ax,bx,cx)-ox)/res), i1 = Math.floor((Math.max(ax,bx,cx)-ox)/res);
+      let j0 = Math.floor((Math.min(az,bz,cz)-oz)/res), j1 = Math.floor((Math.max(az,bz,cz)-oz)/res);
+      i0 = Math.max(0,i0); i1 = Math.min(nx-1,i1); j0 = Math.max(0,j0); j1 = Math.min(nz-1,j1);
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++){   // fill cells whose centre is inside (roof footprints)
+        const px = ox+(i+0.5)*res, pz = oz+(j+0.5)*res;
+        const s1 = (bx-ax)*(pz-az)-(bz-az)*(px-ax), s2 = (cx-bx)*(pz-bz)-(cz-bz)*(px-bx), s3 = (ax-cx)*(pz-cz)-(az-cz)*(px-cx);
+        if (!((s1<0||s2<0||s3<0) && (s1>0||s2>0||s3>0))) occ[j*nx+i] = 1;
       }
-    });
-    city.traverse(o => {                              // pass 2: mark geometry standing 0.6..4 m above the ground
-      if (!o.isMesh || !o.geometry.attributes.position) return;
-      const p = o.geometry.attributes.position;
-      for (let i = 0; i < p.count; i++){
-        v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
-        const c = cellAt(v.x, v.z); if (c < 0) continue;
-        const g = grd[c]; if (v.y > g + 0.6 && v.y < g + 4) occ[c] = 1;
+      for (const e of [[ax,az,bx,bz],[bx,bz,cx,cz],[cx,cz,ax,az]]){    // walk edges so thin wall triangles lay a continuous line
+        const steps = Math.max(1, Math.ceil(Math.hypot(e[2]-e[0],e[3]-e[1])/(res*0.5)));
+        for (let s = 0; s <= steps; s++){ const c = cellAt(e[0]+(e[2]-e[0])*s/steps, e[1]+(e[3]-e[1])*s/steps); if (c >= 0) occ[c] = 1; }
       }
+    };
+    city.traverse(o => {
+      if (!o.isMesh || !o.geometry.attributes.position || !BUILDING_RE.test((o.material && o.material.name) || '')) return;
+      const p = o.geometry.attributes.position, idx = o.geometry.index;
+      const wp = new Float32Array(p.count*3);          // pre-transform this mesh's verts to world once
+      for (let i = 0; i < p.count; i++){ v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); wp[i*3]=v.x; wp[i*3+1]=v.y; wp[i*3+2]=v.z; }
+      const tri = (a,b,c) => markTri(wp[a*3],wp[a*3+2], wp[b*3],wp[b*3+2], wp[c*3],wp[c*3+2]);
+      if (idx){ for (let k = 0; k < idx.count; k += 3) tri(idx.getX(k), idx.getX(k+1), idx.getX(k+2)); }
+      else { for (let k = 0; k < p.count; k += 3) tri(k, k+1, k+2); }
     });
     // fill enclosed regions solid: flood open space inward from the grid edge; any cell the flood can't
     // reach sits inside a wall ring, so mark it occupied. Hollow-shell buildings become solid blocks —
