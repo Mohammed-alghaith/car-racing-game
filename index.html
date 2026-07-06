@@ -813,7 +813,16 @@ if (IS_CITY){
     const junk = [];
     city.traverse(o => { if (o.isMesh && /wheeltex|cartex/i.test((o.material && o.material.name) || '')) junk.push(o); });
     junk.forEach(o => o.parent && o.parent.remove(o));
-    city.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
+    // the model glazes storefronts/windows with TRANSPARENT glass ('Material' at street level, 'US_Doors_1'
+    // on doors/windows) over hollow-shell buildings, so at street level you see straight THROUGH the ground
+    // floor and the facade reads as "no walls". Force just those two glass materials opaque so facades read
+    // solid — foliage/decals/road-paint/rooftop glass keep their alpha (they're named differently).
+    const GLASS = new Set(['Material', 'US_Doors_1']);
+    city.traverse(o => {
+      if (!o.isMesh) return;
+      o.receiveShadow = true;
+      if (o.material && GLASS.has(o.material.name)){ o.material.transparent = false; o.material.depthWrite = true; }
+    });
     scene.add(city);
     city.updateWorldMatrix(true, true);
     // rasterise BUILDING FOOTPRINTS into the grid: for each building mesh, mark every cell its triangles'
