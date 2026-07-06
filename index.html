@@ -830,6 +830,25 @@ if (IS_CITY){
     }
     const filled = new Uint8Array(nx*nz);
     for (let c = 0; c < nx*nz; c++) filled[c] = open[c] ? 0 : 1;
+    // restore STREET-FURNITURE collisions: the footprint pass only solidifies buildings, so lamp posts,
+    // fences, signs and hydrants stopped blocking the car. Re-add the original height-band scan — mark any
+    // cell holding geometry ~0.6–4 m above its local ground — as a UNION on top of the solid buildings.
+    // (Banded relative to local ground, so overhead gantries and tree canopies never block the street below.)
+    // Run AFTER the flood so a thin line of furniture can never seal off a drivable street.
+    const grd = new Float32Array(nx*nz).fill(Infinity);
+    city.traverse(o => {                              // pass A: per-cell ground = lowest street-level vertex
+      if (!o.isMesh || !o.geometry.attributes.position) return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++){ v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+        if (v.y > 6) continue; const c = cellAt(v.x, v.z); if (c >= 0 && v.y < grd[c]) grd[c] = v.y; }
+    });
+    city.traverse(o => {                              // pass B: mark geometry standing 0.6..4 m above that ground
+      if (!o.isMesh || !o.geometry.attributes.position) return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++){ v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld);
+        const c = cellAt(v.x, v.z); if (c < 0) continue; const g = grd[c];
+        if (v.y > g + 0.6 && v.y < g + 4) filled[c] = 1; }
+    });
     cityOcc = {occ: filled, res, ox, oz, nx, nz};
   }, undefined, e => console.error('city model load failed', e));
 }
