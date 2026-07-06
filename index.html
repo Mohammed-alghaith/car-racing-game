@@ -328,6 +328,44 @@ function whoosh(){
   s.connect(f); f.connect(g); g.connect(AC.destination);
   s.start();
 }
+// tire screech — ONE persistent looping-noise source shaped by two resonant bandpasses (the squeal
+// ~1.5 kHz + its harmonic ~2.7 kHz), toggled by ramping a master gain. Built once, lazily; the frame
+// loop only nudges gain + centre freq, so nothing is allocated while sliding. A slow LFO wavers the
+// filters so a held slide breathes like real rubber instead of a flat hiss.
+let screechSrc = null, screechBp1 = null, screechBp2 = null, screechGain = null;
+function initScreech(){
+  if (screechSrc || !AC) return;
+  const b = AC.createBuffer(1, AC.sampleRate*2, AC.sampleRate);   // 2 s of white noise, looped
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random()*2 - 1;
+  screechSrc = AC.createBufferSource(); screechSrc.buffer = b; screechSrc.loop = true;
+  screechBp1 = AC.createBiquadFilter(); screechBp1.type = 'bandpass'; screechBp1.frequency.value = 1500; screechBp1.Q.value = 7;
+  screechBp2 = AC.createBiquadFilter(); screechBp2.type = 'bandpass'; screechBp2.frequency.value = 2700; screechBp2.Q.value = 11;
+  screechGain = AC.createGain(); screechGain.gain.value = 0;
+  screechSrc.connect(screechBp1); screechSrc.connect(screechBp2);
+  screechBp1.connect(screechGain); screechBp2.connect(screechGain);
+  screechGain.connect(AC.destination);
+  const lfo = AC.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 7;   // ~7 Hz waver
+  const lfoAmt = AC.createGain(); lfoAmt.gain.value = 220;                          // +/-220 Hz on each peak
+  lfo.connect(lfoAmt); lfoAmt.connect(screechBp1.frequency); lfoAmt.connect(screechBp2.frequency);
+  screechSrc.start(); lfo.start();
+}
+// every frame: ramp the screech IN while sliding (louder + higher with slip & speed), OUT when gripped.
+// setTargetAtTime gives click-free ~30 ms attack / ~60 ms release. Sits under the engine (gain ~0.2-0.42).
+function updateScreech(active, slip, spd){
+  if (!AC) return;                                    // no context yet -> nothing to ramp
+  if (active && !muted && !driftOff){
+    initScreech();
+    const t = AC.currentTime;
+    const inten = Math.min(1, slip/0.5) * Math.min(1, spd/22);   // hard AND fast slide = full intensity
+    screechGain.gain.setTargetAtTime(0.06 + 0.13*inten, t, 0.03);
+    const f = 1300 + 1500*inten;                                 // squeal pitch climbs with intensity
+    screechBp1.frequency.setTargetAtTime(f, t, 0.05);
+    screechBp2.frequency.setTargetAtTime(f*1.8, t, 0.05);
+  } else if (screechGain){
+    screechGain.gain.setTargetAtTime(0, AC.currentTime, 0.06);
+  }
+}
 const winJingle = () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.2, 'square', 0.16, i*0.13));
 const loseJingle = () => [392, 311, 233].forEach((f, i) => beep(f, 0.28, 'sawtooth', 0.13, i*0.2));
 
@@ -1001,7 +1039,7 @@ if (SPLINE_TRACK){
 } else {                                    // straight
   px = -1.5; pz = 0; heading = 0;
 }
-let travel = heading, speed = 0, drifting = false, lastScreech = 0, carRoll = 0;
+let travel = heading, speed = 0, drifting = false, carRoll = 0;
 let camYaw = heading;                    // camera's own heading — eases toward `travel` so drifts stay smooth
 player.position.set(px, carY, pz); player.rotation.y = heading;
 window.dbg = () => ({track: TRACK, roam: FREEROAM, px: +px.toFixed(1), pz: +pz.toFixed(1), heading: +heading.toFixed(2),
@@ -1303,6 +1341,7 @@ function openMenu(){                       // mid-race: menu doubles as a pause,
   resumeBtn.style.display = '';
   setLobby(true);
   if (AC && engineGain) engineGain.gain.setTargetAtTime(0.03, AC.currentTime, 0.2);
+  if (screechGain) screechGain.gain.setTargetAtTime(0, AC.currentTime, 0.1);   // pause silences the slide (loop early-returns)
 }
 function closeMenu(){
   menuOpen = false;
@@ -1561,8 +1600,8 @@ function frame(now){
   if (drifting){
     speed *= 1 - 0.25*dt;                                 // scrubbing tires cost a little pace
     emitSmoke(px - Math.sin(heading)*2, pz - Math.cos(heading)*2, dt);   // puffs off the rear tires
-    if (now - lastScreech > 90){ lastScreech = now; beep(900 + Math.random()*500, 0.1, 'sawtooth', 0.07); }
   }
+  updateScreech(drifting, Math.abs(travel - heading), speed);   // sustained tire squeal, ramps with slip
   updateSmoke(dt);                                        // puffs keep rising after the slide ends
   const dx = Math.sin(travel)*speed*dt, dz = Math.cos(travel)*speed*dt;
   let playerOff = 0, trackY = 0, pr = null;
