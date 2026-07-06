@@ -1002,6 +1002,7 @@ if (SPLINE_TRACK){
   px = -1.5; pz = 0; heading = 0;
 }
 let travel = heading, speed = 0, drifting = false, lastScreech = 0, carRoll = 0;
+let camYaw = heading;                    // camera's own heading — eases toward `travel` so drifts stay smooth
 player.position.set(px, carY, pz); player.rotation.y = heading;
 window.dbg = () => ({track: TRACK, roam: FREEROAM, px: +px.toFixed(1), pz: +pz.toFixed(1), heading: +heading.toFixed(2),
   speed: +speed.toFixed(1), u: +playerU.toFixed(3), lap: playerLap, drifting, driftOff, boostT: +boostT.toFixed(2),
@@ -1876,9 +1877,12 @@ function frame(now){
   sun.position.set(px + 35, trackY + 70, pz + 25);
   sun.target.position.set(px, trackY, pz);
 
-  // camera hangs off the direction of MOTION, so a drift shows the nose pointing into the corner;
-  // its height rides the track so hills don't sink the boom underground
-  const fx = Math.sin(travel), fz = Math.cos(travel);
+  // camera hangs off the direction of MOTION, so a drift shows the nose pointing into the corner; its height
+  // rides the track so hills don't sink the boom underground. It follows a SEPARATELY-SMOOTHED yaw, not raw
+  // `travel`: when a slide ends, travel snaps back to heading fast (rate 12 vs 2.2) and would whip the boom,
+  // so camYaw eases toward it at a constant rate — the swing stays smooth through drift entry AND exit.
+  camYaw += (travel - camYaw) * (1 - Math.exp(-7*dt));
+  const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
   const target = camMode === 'rear'
     ? new THREE.Vector3(px - fx*9.0, trackY + 3.4, pz - fz*9.0)
     : new THREE.Vector3(px + fx*9.5, trackY + 1.5, pz + fz*9.5);   // low front cam keeps the sprite grounded
