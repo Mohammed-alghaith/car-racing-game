@@ -221,30 +221,42 @@ try { raceCfg = JSON.parse(sessionStorage.raceCfg || 'null'); } catch {}
 // TRACK = 'straight' (endless linear road) | 'circle' (closed spline circuit) | 'city' (drivable Sketchfab downtown).
 // straight uses world-x lanes + linear finish; circle & city share the spline engine (project/sampleAt/laps).
 // city has two sub-modes: routed circuit (laps/rivals) or free-roam (no laps, buildings block you).
-let TRACK = 'straight';
-try { TRACK = localStorage.trackMode || 'straight'; } catch {}
-if (raceCfg && raceCfg.track) TRACK = raceCfg.track;
-if (!['straight', 'circle', 'city'].includes(TRACK)) TRACK = 'straight';
-let CITY_ROAM = false;
-try { CITY_ROAM = localStorage.cityRoam === '1'; } catch {}
-if (raceCfg && raceCfg.cityRoam != null) CITY_ROAM = !!raceCfg.cityRoam;
-const SPLINE = TRACK !== 'straight';       // circle & city drive on a CatmullRom centreline
-const LINEAR = TRACK === 'straight';
-const IS_CITY = TRACK === 'city';
-const FREEROAM = IS_CITY && CITY_ROAM;      // no laps / no finish / no rivals — just the city
-const SPLINE_TRACK = SPLINE && !FREEROAM;   // has a racing line (circle & city-circuit)
-let lvlStored = 1;
-try { lvlStored = parseInt(localStorage.carLevel) || 1; } catch {}
-const campaignLevel = Math.min(THEMES.length, Math.max(1, lvlStored));
-const FREE = IS_CITY || !!(raceCfg && raceCfg.mode === 'free');   // city has no campaign progression
-const LEVEL = (raceCfg && raceCfg.mode === 'free') ? Math.min(THEMES.length, Math.max(1, raceCfg.lvl)) : campaignLevel;
 // city is its own map (not one of the five themes); pick a bright daytime look for the model
 const CITY_THEME = {name: 'المدينة', sky: 0x9fb8d6, ground: 0x3b3b44, sunCol: 0xfff2dc, sunInt: 2.1, hemiInt: 1.05, scen: 'citymodel'};
-const THEME = IS_CITY ? CITY_THEME : THEMES[LEVEL - 1];
+// EVERY mode/theme flag is mutable and recomputed by applyCfg() — from the persisted lobby settings
+// plus an optional race cfg. Called once at parse AND on every in-memory race start, so switching
+// track / theme / sub-mode never needs a page reload (that was the source of the gray-screen flash).
+let TRACK, CITY_ROAM, SPLINE, LINEAR, IS_CITY, FREEROAM, SPLINE_TRACK;
+let campaignLevel, FREE, LEVEL, THEME, LAPS, RACE_LEN;
+function applyCfg(cfg){
+  raceCfg = cfg || null;
+  TRACK = 'straight';
+  try { TRACK = localStorage.trackMode || 'straight'; } catch {}
+  if (cfg && cfg.track) TRACK = cfg.track;
+  if (!['straight', 'circle', 'city'].includes(TRACK)) TRACK = 'straight';
+  CITY_ROAM = false;
+  try { CITY_ROAM = localStorage.cityRoam === '1'; } catch {}
+  if (cfg && cfg.cityRoam != null) CITY_ROAM = !!cfg.cityRoam;
+  SPLINE = TRACK !== 'straight';            // circle & city drive on a CatmullRom centreline
+  LINEAR = TRACK === 'straight';
+  IS_CITY = TRACK === 'city';
+  FREEROAM = IS_CITY && CITY_ROAM;          // no laps / no finish / no rivals — just the city
+  SPLINE_TRACK = SPLINE && !FREEROAM;       // has a racing line (circle & city-circuit)
+  let lvlStored = 1;
+  try { lvlStored = parseInt(localStorage.carLevel) || 1; } catch {}
+  campaignLevel = Math.min(THEMES.length, Math.max(1, lvlStored));
+  FREE = IS_CITY || !!(cfg && cfg.mode === 'free');   // city has no campaign progression
+  LEVEL = (cfg && cfg.mode === 'free') ? Math.min(THEMES.length, Math.max(1, cfg.lvl)) : campaignLevel;
+  THEME = IS_CITY ? CITY_THEME : THEMES[LEVEL - 1];
+  let sl = 3; try { sl = parseInt(localStorage.raceLaps) || 3; } catch {} LAPS = Math.min(9, Math.max(1, sl));
+  let sn = 1500; try { sn = parseInt(localStorage.raceLen) || 1500; } catch {} RACE_LEN = Math.min(5000, Math.max(500, sn));
+}
+applyCfg(raceCfg);
 // linear map uses tighter lanes than the spline circuit; city drives on narrow real streets
 const TILE = 300;                          // straight-mode scenery repeats every TILE metres
 const STRAIGHT_LANES = [-4.5, -1.5, 1.5, 4.5];
 let menuOpen = !raceCfg;                   // fresh visit -> main menu; restarts skip straight to the grid
+let worldGroup = null, builtSig = null;    // the swappable per-world scene group + its config signature
 
 // ---------- sound: all synthesized, no audio files ----------
 let AC = null, engineSrc = null, engineFilter = null, engineGain = null;
@@ -393,7 +405,8 @@ scene.background = new THREE.Color(THEME.sky);
 scene.fog = new THREE.Fog(THEME.sky, 60, 230);
 const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 600);   // longer lens: sprites stay near center, less edge skew
 
-scene.add(new THREE.HemisphereLight(THEME.sky, THEME.ground, THEME.hemiInt));
+const hemi = new THREE.HemisphereLight(THEME.sky, THEME.ground, THEME.hemiInt);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(THEME.sunCol, THEME.sunInt);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -571,7 +584,7 @@ const CITY_ROUTE_LOCAL = [
 ];
 
 let minX = 0, maxX = 0, minZ = 0, maxZ = 0, cX = 0, cZ = 0, span = 400;
-if (SPLINE_TRACK){                                    // circle & city-circuit need the racing line
+function buildSplineAndBBox(){                        // circle & city-circuit need the racing line
   const CP = IS_CITY ? CITY_ROUTE_LOCAL.map(p => cityToWorld(p[0], p[1])) : CIRCLE_CP;
   buildSplineTable(CP, IS_CITY ? 'centripetal' : 'catmullrom');   // centripetal hugs the waypoints (no overshoot into buildings)
   minX = 1e9; maxX = -1e9; minZ = 1e9; maxZ = -1e9;
@@ -579,53 +592,59 @@ if (SPLINE_TRACK){                                    // circle & city-circuit n
   cX = (minX + maxX)/2; cZ = (minZ + maxZ)/2; span = Math.max(maxX - minX, maxZ - minZ) + 500;
 }
 
-if (TRACK === 'circle'){                              // ribbon road + curbs + verges + themed ground
+function buildCircleGeo(){                             // ribbon road + curbs + verges + themed ground
   const road = buildRibbon(ROAD_HALF, -ROAD_HALF,
     new THREE.MeshStandardMaterial({map: roadTex, roughness: .95}), {vScale: 6, lift: 0.02});
-  scene.add(road);
+  worldGroup.add(road);
   const curbMat = new THREE.MeshBasicMaterial({map: curbTex});
-  scene.add(buildRibbon(ROAD_HALF, ROAD_HALF + CURB_W, curbMat, {vScale: 2, lift: 0.15}));
-  scene.add(buildRibbon(-ROAD_HALF - CURB_W, -ROAD_HALF, curbMat, {vScale: 2, lift: 0.15}));
+  worldGroup.add(buildRibbon(ROAD_HALF, ROAD_HALF + CURB_W, curbMat, {vScale: 2, lift: 0.15}));
+  worldGroup.add(buildRibbon(-ROAD_HALF - CURB_W, -ROAD_HALF, curbMat, {vScale: 2, lift: 0.15}));
   const vergeMat = new THREE.MeshStandardMaterial({color: new THREE.Color(THEME.ground).multiplyScalar(0.82), roughness: 1});
-  scene.add(buildRibbon(ROAD_HALF + CURB_W, ROAD_HALF + CURB_W + VERGE_W, vergeMat, {bY: 0}));
-  scene.add(buildRibbon(-ROAD_HALF - CURB_W - VERGE_W, -ROAD_HALF - CURB_W, vergeMat, {aY: 0}));
+  worldGroup.add(buildRibbon(ROAD_HALF + CURB_W, ROAD_HALF + CURB_W + VERGE_W, vergeMat, {bY: 0}));
+  worldGroup.add(buildRibbon(-ROAD_HALF - CURB_W - VERGE_W, -ROAD_HALF - CURB_W, vergeMat, {aY: 0}));
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span, span), new THREE.MeshStandardMaterial({color: THEME.ground}));
   ground.rotation.x = -Math.PI/2; ground.position.set(cX, -0.06, cZ); ground.receiveShadow = true;
-  scene.add(ground);
+  worldGroup.add(ground);
   if (THEME.scen === 'coast'){       // an ocean off to one side for the sunset-coast theme
     const water = new THREE.Mesh(new THREE.PlaneGeometry(span*1.4, span),
       new THREE.MeshStandardMaterial({color: 0x2f6ea8, roughness: .25, metalness: .5}));
     water.rotation.x = -Math.PI/2; water.position.set(maxX + span*0.55, -1.4, cZ);
-    scene.add(water);
+    worldGroup.add(water);
   }
 }
 
 // ---------- straight mode: uniform road/grass/curb strips, snapped to the player each frame ----------
 let grass = null, straightRoad = null, sidewalks = [];
-if (LINEAR){
+function buildStraightGeo(){
   grass = new THREE.Mesh(new THREE.PlaneGeometry(600, TILE*3), new THREE.MeshStandardMaterial({color: THEME.ground}));
   grass.rotation.x = -Math.PI/2; grass.position.y = -0.02; grass.receiveShadow = true;
-  scene.add(grass);
+  worldGroup.add(grass);
   straightRoad = new THREE.Mesh(new THREE.PlaneGeometry(13, TILE*3), new THREE.MeshStandardMaterial({map: roadTex, roughness: .95}));
   straightRoad.rotation.x = -Math.PI/2; straightRoad.position.y = 0.05; straightRoad.receiveShadow = true;
-  scene.add(straightRoad);
+  worldGroup.add(straightRoad);
   const walkMat = new THREE.MeshStandardMaterial({color: 0xbdbdb6});
   sidewalks = [-7.5, 7.5].map(x => {
     const s = new THREE.Mesh(new THREE.BoxGeometry(3, 0.18, TILE*3), walkMat);
     s.position.set(x, 0.09, 0); s.receiveShadow = true;
-    scene.add(s); return s;
+    worldGroup.add(s); return s;
   });
 }
 
 // ---------- city tile (buildings + palms), cloned 3x for endless street ----------
 const roofMat = new THREE.MeshStandardMaterial({color:0x8a8a88});
-const wallMats = [0xd8d3c8, 0xb9c4cc, 0xc9b8a8, 0x9fb3bd, 0xe0ddd4, 0xa8bcae].map(color => {
-  const t = winTex.clone(); t.needsUpdate = true;
-  t.repeat.set(1.5 + Math.random()*1.5, 3 + Math.random()*3);
-  const opts = {color, map: t};
-  if (THEME.scen === 'night'){ opts.emissive = 0xbbbb88; opts.emissiveMap = t; opts.emissiveIntensity = 0.65; }
-  return new THREE.MeshStandardMaterial(opts);
-});
+// window materials depend on THEME (night glows its panes), so they're rebuilt per world. Dispose the
+// previous set's cloned textures first — they'd otherwise leak VRAM on every theme switch.
+let wallMats = null;
+function buildWallMats(){
+  if (wallMats) wallMats.forEach(m => { if (m.map) m.map.dispose(); });
+  wallMats = [0xd8d3c8, 0xb9c4cc, 0xc9b8a8, 0x9fb3bd, 0xe0ddd4, 0xa8bcae].map(color => {
+    const t = winTex.clone(); t.needsUpdate = true;
+    t.repeat.set(1.5 + Math.random()*1.5, 3 + Math.random()*3);
+    const opts = {color, map: t};
+    if (THEME.scen === 'night'){ opts.emissive = 0xbbbb88; opts.emissiveMap = t; opts.emissiveIntensity = 0.65; }
+    return new THREE.MeshStandardMaterial(opts);
+  });
+}
 const trunkMat = new THREE.MeshStandardMaterial({color:0x8a6a4a});
 const leafMat  = new THREE.MeshStandardMaterial({color:0x2f8f3f});
 const leafGeo  = new THREE.BoxGeometry(2.2, 0.06, 0.5); leafGeo.translate(1.1, 0, 0);
@@ -712,11 +731,11 @@ function placeProp(prop, u, off, clearance){
   const c = sampleAt(u), x = c.x + c.side.x*off, z = c.z + c.side.z*off;
   if (clearance && nearTrack(x, z, clearance)) return null;
   prop.position.set(x, prop.position.y + groundYAt(c.y, off), z);
-  scene.add(prop); return prop;
+  worldGroup.add(prop); return prop;
 }
 // circle: scatter themed scenery all the way around the loop, just beyond the grass verge
 const EDGE = ROAD_HALF + CURB_W + VERGE_W;
-if (TRACK === 'circle'){
+function buildCircleScenery(){
   const scen = THEME.scen;
   for (let u = 0; u < 1; u += 0.006){
     for (const sgn of [-1, 1]){
@@ -754,13 +773,13 @@ if (TRACK === 'circle'){
     const top = new THREE.Mesh(new THREE.BoxGeometry(2*(ROAD_HALF + 2.3), 1.4, 2.4), stoneMat);
     top.position.set(0, 6.6, 0); top.castShadow = true; g.add(top);
     g.position.set(c.x, c.y, c.z); g.rotation.y = Math.atan2(c.fwd.x, c.fwd.z);
-    scene.add(g);
+    worldGroup.add(g);
   }
 }
 
 // straight: scenery tile (buildings/palms/props), cloned 3x and snapped around the player for an endless street
 let tiles = [];
-if (LINEAR){
+function buildStraightTiles(){
   const makeTile = () => {
     const g = new THREE.Group();
     const scen = THEME.scen;
@@ -797,7 +816,7 @@ if (LINEAR){
   };
   const proto = makeTile();
   tiles = [proto, proto.clone(), proto.clone()];
-  tiles.forEach(t => scene.add(t));
+  tiles.forEach(t => worldGroup.add(t));
 }
 
 // ---------- city: the Sketchfab downtown IS the drivable map ----------
@@ -815,11 +834,23 @@ const cityCell = (x, z) => {
   return (ix < 0 || ix >= cityOcc.nx || iz < 0 || iz >= cityOcc.nz) ? -1 : iz*cityOcc.nx + ix;
 };
 function occBlocked(x, z){ const c = cityCell(x, z); return c < 0 ? false : cityOcc.occ[c] === 1; }
-if (IS_CITY){
+// city.glb is loaded + decoded + rasterised ONCE, then the model is cached and re-added on every city
+// entry — never re-fetched. This is the whole point of the no-reload rework (the 5 MB decode was the
+// worst of the gray-screen flash). cityOcc is likewise built once with the model.
+let cityModel = null, cityLoading = false;
+function buildCityGeo(){
   // a dark asphalt ground plane so the world isn't a void beyond the model edges
   const gp = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), new THREE.MeshStandardMaterial({color: 0x2c2c33, roughness: 1}));
-  gp.rotation.x = -Math.PI/2; gp.position.y = -0.05; gp.receiveShadow = true; scene.add(gp);
+  gp.rotation.x = -Math.PI/2; gp.position.y = -0.05; gp.receiveShadow = true; worldGroup.add(gp);
+  ensureCity();
+}
+function removeCity(){ if (cityModel && cityModel.parent) scene.remove(cityModel); }
+function ensureCity(){
+  if (cityModel){ if (!cityModel.parent && IS_CITY) scene.add(cityModel); return; }   // cached — just re-add
+  if (cityLoading) return;                                                             // in-flight — callback will add
+  cityLoading = true;
   gltfLoader.load('city.glb', gltf => {
+    cityLoading = false;
     const city = gltf.scene;
     city.scale.setScalar(CITY_SCALE);
     city.position.set(-CITY_LOCAL_CENTER.x*CITY_SCALE, -CITY_MIN_Y*CITY_SCALE, -CITY_LOCAL_CENTER.z*CITY_SCALE);
@@ -841,8 +872,7 @@ if (IS_CITY){
       o.receiveShadow = true;
       if (o.material && GLASS.has(o.material.name)){ o.material.transparent = false; o.material.depthWrite = true; }
     });
-    scene.add(city);
-    city.updateWorldMatrix(true, true);
+    city.updateWorldMatrix(true, true);   // world matrices for the occupancy raster (works detached from scene)
     // rasterise BUILDING FOOTPRINTS into the grid: for each building mesh, mark every cell its triangles'
     // (x,z) projection covers. Roof triangles are horizontal, so filling their footprint solidifies each
     // building; wall/facade triangles are near-vertical (near-degenerate in XZ), so we also walk their edges
@@ -925,7 +955,9 @@ if (IS_CITY){
       else { for (let k = 0; k < p.count; k += 3) T(k, k+1, k+2); }
     });
     cityOcc = {occ: filled, res, ox, oz, nx, nz};
-  }, undefined, e => console.error('city model load failed', e));
+    cityModel = city;
+    if (IS_CITY) scene.add(city);   // only show it if a fast mode-switch didn't leave city while we decoded
+  }, undefined, e => { cityLoading = false; console.error('city model load failed', e); });
 }
 
 // ---------- cars: one cyberpunk GLB for every car on the grid ----------
@@ -1048,85 +1080,38 @@ scene.add(player);
 dressCar(player, playerColor);
 window.__paint = {tint: n => tintCar(player, n)};   // debug hook
 
-// racing-line lanes + soft barrier: much narrower on the city's tight streets than the open circuit
-const LANE_OFF = IS_CITY ? [-1.8, -0.6, 0.6, 1.8] : OFFSETS;
-const BARRIER = IS_CITY ? 12 : WALL;   // city: loose — buildings are the real wall (occupancy); this just discourages wandering onto another street
+// racing-line lanes + soft barrier: much narrower on the city's tight streets than the open circuit.
+// These + the starting grid depend on the mode/spline, so they're (re)computed by buildWorld().
+let LANE_OFF = OFFSETS, BARRIER = WALL;   // city: loose — buildings are the real wall (occupancy); this just discourages wandering onto another street
 const START_U = 0.004;
 // starting grid for the loop races (circle & city): 2 columns (±GRID_LANE) x 2 rows (GRID_ROW behind the
 // front), staggered so no two cars ever overlap. Player takes pole (front-left); the 3 rivals fill the
 // other slots. Row gap is expressed in track-u (metres / total length); the back row wraps to just behind
 // the start line, which sampleAt/wrapDU handle and which only lap-counts once u actually reaches 1.
-const GRID_LANE = 2.5, GRID_ROW = SPLINE_TRACK ? 7 / L : 0;
-const START_GRID = [
-  {off: -GRID_LANE, du: 0},          // pole — player, front-left
-  {off:  GRID_LANE, du: 0},          // front-right
-  {off: -GRID_LANE, du: -GRID_ROW},  // back-left
-  {off:  GRID_LANE, du: -GRID_ROW},  // back-right
-];
-// spawn: on the start line for a race; on a street for free-roam; on the road origin for straight
-let px, pz, heading, carY = 0, playerU = START_U, playerLap = 0, prevU = START_U;
-if (SPLINE_TRACK){
-  const startPt = sampleAt(START_U);
-  projHint = Math.floor(START_U*N);
-  px = startPt.x + startPt.side.x*START_GRID[0].off; pz = startPt.z + startPt.side.z*START_GRID[0].off;
-  heading = Math.atan2(startPt.fwd.x, startPt.fwd.z); carY = startPt.y;
-} else if (FREEROAM){
-  const a = cityToWorld(CITY_ROUTE_LOCAL[0][0], CITY_ROUTE_LOCAL[0][1]);
-  const b = cityToWorld(CITY_ROUTE_LOCAL[1][0], CITY_ROUTE_LOCAL[1][1]);
-  px = a.x; pz = a.z; heading = Math.atan2(b.x - a.x, b.z - a.z);
-} else {                                    // straight
-  px = -1.5; pz = 0; heading = 0;
-}
-let travel = heading, speed = 0, drifting = false, carRoll = 0;
-let camYaw = heading;                    // camera's own heading — eases toward `travel` so drifts stay smooth
-player.position.set(px, carY, pz); player.rotation.y = heading;
+const GRID_LANE = 2.5;
+let GRID_ROW = 0, START_GRID = [];
+// player + race state — all mutable, (re)set to a fresh grid by resetRace() every race start
+let px = 0, pz = 0, heading = 0, carY = 0, playerU = START_U, playerLap = 0, prevU = START_U;
+let travel = 0, speed = 0, drifting = false, carRoll = 0;
+let camYaw = 0;                          // camera's own heading — eases toward `travel` so drifts stay smooth
+let raceT = -3, finished = false, lastCnt = 99;   // free-roam skips the start countdown (set in resetRace)
+const fmtTime = t => `${Math.floor(t/60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 window.dbg = () => ({track: TRACK, roam: FREEROAM, px: +px.toFixed(1), pz: +pz.toFixed(1), heading: +heading.toFixed(2),
   speed: +speed.toFixed(1), u: +playerU.toFixed(3), lap: playerLap, drifting, driftOff, boostT: +boostT.toFixed(2),
   boostCount, carsReady: !!glbTemplate, cityOcc: !!cityOcc,
   pads: {gas: input.drive, brake: input.brake, L: keys.left, R: keys.right},
   race: {t: +raceT.toFixed(2), finished, menuOpen},
   audio: AC ? `${AC.state}${muted ? ' (muted)' : ''}${engineSrc ? ' +engine' : ' NO ENGINE'}${musicEl ? (musicOff ? ' music:silenced' : ' music:playing') : ' music:not-started'}` : 'not started',
-  rivals: rivals.map(r => r.u != null ? {u: +r.u.toFixed(3), lap: r.lap} : {x: +r.x.toFixed(1), z: +r.z.toFixed(0)})});
+  rivals: rivals.map(r => r.u != null ? {u: +r.u.toFixed(3), lap: r.lap} : r.x != null ? {x: +r.x.toFixed(1), z: +r.z.toFixed(0)} : {})});
 
-// ---------- race: straight = first past RACE_LEN; circle/city-circuit = first to finish the laps ----------
-let storedLaps = 3;                         // lap count is a lobby setting
-try { storedLaps = parseInt(localStorage.raceLaps) || 3; } catch {}
-const LAPS = Math.min(9, Math.max(1, storedLaps));
-let storedLen = 1500;                        // straight-race distance is a lobby setting
-try { storedLen = parseInt(localStorage.raceLen) || 1500; } catch {}
-const RACE_LEN = Math.min(5000, Math.max(500, storedLen));
-let raceT = FREEROAM ? 1 : -3, finished = false, lastCnt = 99;   // free-roam skips the start countdown
-const fmtTime = t => `${Math.floor(t/60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
-
-// rivals — track space (u + offset) on the spline, or world lanes (x + z) on the straight road; none in free-roam
-let rivals = [];
-if (SPLINE_TRACK){
-  rivals = [1, 2, 3].map((gi, i) => {
-    const g = START_GRID[gi], off = g.off, u = START_U + g.du;
-    const mesh = new THREE.Group();
-    dressCar(mesh, rivalColors[i]);
-    const c = sampleAt(u);
-    mesh.position.set(c.x + c.side.x*off, c.y, c.z + c.side.z*off);
-    scene.add(mesh);
-    const agg = 0.3 + Math.random()*0.7;    // temperament: tailgating, blocking, brake point
-    return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], u, lap: 0, off, targetOff: off,
-            base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
-            agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
-            ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
-  });
-} else if (LINEAR){
-  rivals = [-4.5, 1.5, 4.5].map((lx, i) => {
-    const mesh = new THREE.Group();
-    dressCar(mesh, rivalColors[i]);
-    mesh.position.set(lx, 0, 0);
-    scene.add(mesh);
-    const agg = 0.3 + Math.random()*0.7;
-    return {mesh, name: cap(rivalColors[i]), tint: rivalColors[i], x: lx, z: 0, targetX: lx,
-            base: MAX*(0.84 + i*0.05), cur: 0, hit: false,
-            agg, react: 0.65 - agg*0.35, tNext: 0, launch: 0.1 + Math.random()*0.4,
-            ph: Math.random()*7, wf: 0.6 + Math.random()*0.8, nitro: 0, boostT: 0};
-  });
-}
+// rivals: three persistent dressed cars, created ONCE. Their tracking fields (u+off on the spline, x+z on
+// the straight road) and AI temperament are (re)assigned per race by resetRace() — no rebuild, no reload.
+const rivals = rivalColors.map((col, i) => {
+  const mesh = new THREE.Group();
+  dressCar(mesh, col);
+  scene.add(mesh);
+  return {mesh, name: cap(col), tint: col, i, cur: 0, hit: false, nitro: 0, boostT: 0};
+});
 
 // finish line: checkered stripe on the road + overhead gantry
 const checkTex = canvasTex(64, g => {
@@ -1162,30 +1147,32 @@ const pyloTex = new THREE.CanvasTexture(pyloCv);
 pyloTex.colorSpace = THREE.SRGBColorSpace;
 pyloTex.wrapT = THREE.RepeatWrapping; pyloTex.repeat.set(1, 3);
 
-if (SPLINE_TRACK){
-  // gantry astride the start/finish line (u=0), yawed along the track: local +Z = forward, +X = car's left
-  const gate = new THREE.Group();
-  const g0 = sampleAt(0);
-  gate.position.set(g0.x, g0.y, g0.z);
-  gate.rotation.y = Math.atan2(g0.fwd.x, g0.fwd.z);
-  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(2*ROAD_HALF, 4.5), finishMat);
-  stripe.rotation.x = -Math.PI/2; stripe.position.y = 0.09; gate.add(stripe);
-  const banner = new THREE.Mesh(new THREE.BoxGeometry(2*ROAD_HALF + 1.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
-  banner.position.y = 4.7; gate.add(banner);
-  for (const x of [-(ROAD_HALF + 0.4), ROAD_HALF + 0.4]){
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
-    p.position.set(x, 2.8, 0); gate.add(p);
-  }
-  scene.add(gate);
-} else if (LINEAR){
-  // straight finish: checkered stripe + FINISH banner + pylons across the road at z = RACE_LEN
-  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(13, 4.5), finishMat);
-  stripe.rotation.x = -Math.PI/2; stripe.position.set(0, 0.08, RACE_LEN); scene.add(stripe);
-  const banner = new THREE.Mesh(new THREE.BoxGeometry(15.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
-  banner.position.set(0, 4.7, RACE_LEN); scene.add(banner);
-  for (const x of [-7.4, 7.4]){
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
-    p.position.set(x, 2.8, RACE_LEN); scene.add(p);
+function buildFinish(){                     // free-roam has no finish line
+  if (SPLINE_TRACK){
+    // gantry astride the start/finish line (u=0), yawed along the track: local +Z = forward, +X = car's left
+    const gate = new THREE.Group();
+    const g0 = sampleAt(0);
+    gate.position.set(g0.x, g0.y, g0.z);
+    gate.rotation.y = Math.atan2(g0.fwd.x, g0.fwd.z);
+    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(2*ROAD_HALF, 4.5), finishMat);
+    stripe.rotation.x = -Math.PI/2; stripe.position.y = 0.09; gate.add(stripe);
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(2*ROAD_HALF + 1.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
+    banner.position.y = 4.7; gate.add(banner);
+    for (const x of [-(ROAD_HALF + 0.4), ROAD_HALF + 0.4]){
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
+      p.position.set(x, 2.8, 0); gate.add(p);
+    }
+    worldGroup.add(gate);
+  } else if (LINEAR){
+    // straight finish: checkered stripe + FINISH banner + pylons across the road at z = RACE_LEN
+    const stripe = new THREE.Mesh(new THREE.PlaneGeometry(13, 4.5), finishMat);
+    stripe.rotation.x = -Math.PI/2; stripe.position.set(0, 0.08, RACE_LEN); worldGroup.add(stripe);
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(15.4, 1.7, 0.14), new THREE.MeshBasicMaterial({map: bannerTex}));
+    banner.position.set(0, 4.7, RACE_LEN); worldGroup.add(banner);
+    for (const x of [-7.4, 7.4]){
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 5.6, 10), new THREE.MeshBasicMaterial({map: pyloTex}));
+      p.position.set(x, 2.8, RACE_LEN); worldGroup.add(p);
+    }
   }
 }
 
@@ -1223,16 +1210,22 @@ function dropTank(wx, wy, wz){
   scene.add(g);
   boosters.push({g, x: wx, y: wy, z: wz, taken: false, ph: Math.random()*Math.PI*2});
 }
-if (SPLINE_TRACK){                          // nitro tanks on the racing line, around the loop
-  for (const [ru, li] of [[0.08, 1], [0.19, 2], [0.31, 3], [0.44, 1], [0.57, 2], [0.68, 0], [0.79, 2], [0.9, 1]]){
-    const c = sampleAt(ru), lane = LANE_OFF[li];
-    dropTank(c.x + c.side.x*lane, c.y + 0.55, c.z + c.side.z*lane);
+// booster positions/count are mode-dependent, so they're (re)placed by buildWorld. Tanks reuse shared
+// geometries/materials, so old ones are just detached from the scene (never disposed) before re-dropping.
+function buildBoosters(){
+  boosters.forEach(b => scene.remove(b.g));
+  boosters.length = 0;
+  if (SPLINE_TRACK){                          // nitro tanks on the racing line, around the loop
+    for (const [ru, li] of [[0.08, 1], [0.19, 2], [0.31, 3], [0.44, 1], [0.57, 2], [0.68, 0], [0.79, 2], [0.9, 1]]){
+      const c = sampleAt(ru), lane = LANE_OFF[li];
+      dropTank(c.x + c.side.x*lane, c.y + 0.55, c.z + c.side.z*lane);
+    }
+  } else if (LINEAR){                         // nitro tanks down the straight, one per random lane
+    for (let z = 150; z < RACE_LEN - 150; z += 160 + Math.random()*120)
+      dropTank(STRAIGHT_LANES[Math.floor(Math.random()*STRAIGHT_LANES.length)], 0.55, z);
+  } else {                                    // free-roam: a scatter along the city streets
+    for (const [lx, lz] of CITY_ROUTE_LOCAL){ const w = cityToWorld(lx, lz); dropTank(w.x, 0.55, w.z); }
   }
-} else if (LINEAR){                         // nitro tanks down the straight, one per random lane
-  for (let z = 150; z < RACE_LEN - 150; z += 160 + Math.random()*120)
-    dropTank(STRAIGHT_LANES[Math.floor(Math.random()*STRAIGHT_LANES.length)], 0.55, z);
-} else {                                    // free-roam: a scatter along the city streets
-  for (const [lx, lz] of CITY_ROUTE_LOCAL){ const w = cityToWorld(lx, lz); dropTank(w.x, 0.55, w.z); }
 }
 
 // exhaust flames, shown while the boost is burning
@@ -1363,26 +1356,30 @@ const distEl = document.getElementById('dist');
 const resultEl = document.getElementById('result');
 const resultText = document.getElementById('resultText');
 const resultBtn = document.getElementById('restart');
-let advance = false;                      // set on a win — the result button then loads the next challenge
+let advance = false;                      // set on a win — the result button then starts the next challenge
 resultBtn.addEventListener('click', () => {
   if (advance){ try { localStorage.carLevel = LEVEL < THEMES.length ? LEVEL + 1 : 1; } catch {} }
-  location.reload();
+  startRace(raceCfg);                     // in-memory restart (campaign re-reads carLevel for the advanced level)
 });
-document.getElementById('lvl').textContent =
-  FREE ? `سباق حر · ${THEME.name}` : `التحدي ${LEVEL}/${THEMES.length} · ${THEME.name}`;
 
 // ---------- main menu ----------
 const menuEl = document.getElementById('menu');
-const lobbyFresh = menuOpen;               // true only on a fresh visit (no race to resume)
 const resumeBtn = document.getElementById('resumeBtn');
 resumeBtn.style.display = 'none';
-function openMenu(){                       // mid-race: menu doubles as a pause, nothing is lost
+// the menu doubles as an in-race pause (resumable) and as the between-races lobby (not resumable).
+// refreshLobby re-syncs the campaign label + lens to the current persisted settings each time it opens.
+function refreshLobby(){
+  campBtn.textContent = `▶ الحملة — التحدي ${campaignLevel}/${THEMES.length} · ${THEMES[campaignLevel-1].name}`;
+  applyMode(selMode);
+}
+function openMenu(resumable){
   menuOpen = true;
   menuEl.style.display = 'flex';
-  resumeBtn.style.display = '';
+  resumeBtn.style.display = resumable ? '' : 'none';
+  refreshLobby();
   setLobby(true);
   if (AC && engineGain) engineGain.gain.setTargetAtTime(0.03, AC.currentTime, 0.2);
-  if (screechGain) screechGain.gain.setTargetAtTime(0, AC.currentTime, 0.1);   // pause silences the slide (loop early-returns)
+  if (screechGain && AC) screechGain.gain.setTargetAtTime(0, AC.currentTime, 0.1);   // pause silences the slide (loop early-returns)
 }
 function closeMenu(){
   menuOpen = false;
@@ -1390,7 +1387,12 @@ function closeMenu(){
   setLobby(false);
 }
 resumeBtn.addEventListener('click', closeMenu);
-const toMenu = () => { try { sessionStorage.removeItem('raceCfg'); } catch {} location.reload(); };
+function toMenu(){                         // "القائمة" from the result overlay → back to a fresh lobby (no reload)
+  try { sessionStorage.removeItem('raceCfg'); } catch {}
+  raceCfg = null;
+  resultEl.style.display = 'none';
+  openMenu(false);
+}
 document.getElementById('menuBtn2').addEventListener('click', toMenu);
 // ----- top-level mode selector: straight / circle / city (persisted; the chosen start reloads the world) -----
 const modesEl = document.getElementById('modes');
@@ -1412,8 +1414,8 @@ function buildLens(m){
       if (v === RACE_LEN) b.classList.add('sel');
       b.addEventListener('click', () => {
         try { localStorage.raceLen = v; } catch {}
-        if (lobbyFresh) location.reload();
-        else lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+        RACE_LEN = v;                      // applied at the next startRace (which rebuilds the finish line)
+        lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
       });
       lensEl.appendChild(b);
     });
@@ -1425,8 +1427,8 @@ function buildLens(m){
       if (v === LAPS) b.classList.add('sel');
       b.addEventListener('click', () => {
         try { localStorage.raceLaps = v; } catch {}
-        if (lobbyFresh) location.reload();
-        else lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+        LAPS = v;                          // applied at the next startRace / resetRace (no geometry to rebuild)
+        lensEl.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
       });
       lensEl.appendChild(b);
     });
@@ -1449,11 +1451,8 @@ function applyMode(m){
 const campBtn = document.getElementById('playCampaign');
 campBtn.textContent = `▶ الحملة — التحدي ${campaignLevel}/${THEMES.length} · ${THEMES[campaignLevel-1].name}`;
 campBtn.addEventListener('click', () => {
-  try { sessionStorage.raceCfg = JSON.stringify({mode: 'campaign', track: selMode}); } catch {}
   persistMode(selMode);
-  initAudio();
-  if (lobbyFresh && selMode === TRACK) closeMenu();   // scene already built for this mode+level
-  else location.reload();                             // mode changed or mid-race: rebuild fresh
+  startRace({mode: 'campaign', track: selMode});   // in-memory: rebuilds the world only if the mode/theme changed
 });
 const mapsEl = document.getElementById('maps');
 THEMES.forEach((t, i) => {
@@ -1463,10 +1462,8 @@ THEMES.forEach((t, i) => {
   b.style.background = `#${t.sky.toString(16).padStart(6, '0')}`;
   b.style.color = (r*0.35 + g*0.5 + bl*0.15) > 130 ? '#1c1c22' : '#fff';
   b.addEventListener('click', () => {
-    try { sessionStorage.raceCfg = JSON.stringify({mode: 'free', lvl: i + 1, track: selMode}); } catch {}
     persistMode(selMode);
-    initAudio();
-    location.reload();
+    startRace({mode: 'free', lvl: i + 1, track: selMode});
   });
   mapsEl.appendChild(b);
 });
@@ -1475,12 +1472,8 @@ THEMES.forEach((t, i) => {
   const b = document.createElement('button');
   b.innerHTML = label;
   b.addEventListener('click', () => {
-    try {
-      sessionStorage.raceCfg = JSON.stringify({mode: 'free', track: 'city', cityRoam: roam});
-      localStorage.trackMode = 'city'; localStorage.cityRoam = roam ? '1' : '0';
-    } catch {}
-    initAudio();
-    location.reload();
+    try { localStorage.trackMode = 'city'; localStorage.cityRoam = roam ? '1' : '0'; } catch {}
+    startRace({mode: 'free', track: 'city', cityRoam: roam});
   });
   cityBtnsEl.appendChild(b);
 });
@@ -1497,8 +1490,7 @@ function recolorPlayer(name){
     tintCar(r.mesh, free);
   }
 }
-document.getElementById('dist').textContent = LINEAR ? `${RACE_LEN} م` : (FREEROAM ? '' : `لفة 1/${LAPS}`);
-applyMode(selMode);   // sets the initial section visibility + lens for the current track
+applyMode(selMode);   // sets the initial section visibility + lens for the current track (#dist owned by resetRace)
 
 const colorsEl = document.getElementById('colors');
 Object.entries(BODY_TINT).forEach(([name, rgb]) => {
@@ -1546,16 +1538,120 @@ sndBtn.addEventListener('click', toggleSound);
 musicBtn.addEventListener('click', toggleMusic);
 driftBtn.addEventListener('click', toggleDrift);
 syncAudioUI();
-// workshop mode: hide the race HUD and the rivals so your car has the floor
+// workshop mode: hide the race HUD and the rivals so your car has the floor (free-roam has no rivals)
 const hudEl = document.getElementById('hud');
 function setLobby(on){
   hudEl.style.visibility = on ? 'hidden' : 'visible';
-  rivals.forEach(r => r.mesh.visible = !on);
+  rivals.forEach(r => r.mesh.visible = !on && !FREEROAM);
 }
+// pause = the menu: it freezes the race and already offers resume/restart/lobby
+document.getElementById('stopBtn').addEventListener('pointerdown', () => openMenu(true));
+
+// ---------- world lifecycle orchestrators: build once, rebuild on config change, never reload ----------
+const worldSig = () => JSON.stringify([TRACK, LEVEL, CITY_ROAM, RACE_LEN]);   // LAPS excluded: no geometry
+function disposeWorld(){
+  if (!worldGroup) return;
+  // free per-world geometries (the real VRAM cost) but NOT shared singletons reused across builds:
+  // leafGeo (palm fronds) is the only shared geometry that lands in worldGroup; prop MATERIALS are all
+  // shared/tiny and left alone (their textures are shared and must not be freed).
+  worldGroup.traverse(o => { if (o.isMesh && o.geometry && o.geometry !== leafGeo) o.geometry.dispose(); });
+  scene.remove(worldGroup);
+}
+function buildWorld(){
+  disposeWorld();
+  worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+  LANE_OFF = IS_CITY ? [-1.8, -0.6, 0.6, 1.8] : OFFSETS;
+  BARRIER = IS_CITY ? 12 : WALL;
+  if (SPLINE_TRACK) buildSplineAndBBox();               // rebuilds the global spline table (pos/fwd/side/…)
+  GRID_ROW = SPLINE_TRACK ? 7 / L : 0;
+  START_GRID = [
+    {off: -GRID_LANE, du: 0}, {off: GRID_LANE, du: 0},
+    {off: -GRID_LANE, du: -GRID_ROW}, {off: GRID_LANE, du: -GRID_ROW},
+  ];
+  buildWallMats();                                       // per-theme (night glows), used by the scenery below
+  if (TRACK === 'circle'){ buildCircleGeo(); buildCircleScenery(); }
+  if (LINEAR){ buildStraightGeo(); buildStraightTiles(); }
+  if (IS_CITY) buildCityGeo(); else removeCity();
+  buildFinish();
+  buildBoosters();
+}
+function applyThemeLook(){                                // recolor sky/fog/lights in place (circle/straight theme swaps)
+  scene.background.set(THEME.sky);
+  scene.fog.color.set(THEME.sky);
+  hemi.color.set(THEME.sky); hemi.groundColor.set(THEME.ground); hemi.intensity = THEME.hemiInt;
+  sun.color.set(THEME.sunCol); sun.intensity = THEME.sunInt;
+}
+function resetRace(){                                     // reset ALL race state to a fresh grid — no rebuild needed
+  // player spawn: start line for a race, a street for free-roam, road origin for straight
+  if (SPLINE_TRACK){
+    const s = sampleAt(START_U);
+    projHint = Math.floor(START_U*N);
+    px = s.x + s.side.x*START_GRID[0].off; pz = s.z + s.side.z*START_GRID[0].off;
+    heading = Math.atan2(s.fwd.x, s.fwd.z); carY = IS_CITY ? CITY_STREET_Y : s.y;
+  } else if (FREEROAM){
+    const a = cityToWorld(CITY_ROUTE_LOCAL[0][0], CITY_ROUTE_LOCAL[0][1]);
+    const b = cityToWorld(CITY_ROUTE_LOCAL[1][0], CITY_ROUTE_LOCAL[1][1]);
+    px = a.x; pz = a.z; heading = Math.atan2(b.x - a.x, b.z - a.z); carY = CITY_STREET_Y;
+  } else {
+    px = -1.5; pz = 0; heading = 0; carY = 0;
+  }
+  travel = heading; camYaw = heading; speed = 0; drifting = false; carRoll = 0;
+  playerU = START_U; playerLap = 0; prevU = START_U;
+  player.position.set(px, carY, pz); player.rotation.set(0, heading, 0);
+  // rivals: reposition onto the grid + re-roll temperament (fresh race feel), or hide in free-roam
+  rivals.forEach((r, i) => {
+    r.cur = 0; r.hit = false; r.tNext = 0; r.nitro = 0; r.boostT = 0; r.lap = 0;
+    r.base = MAX*(0.84 + i*0.05);
+    r.agg = 0.3 + Math.random()*0.7; r.react = 0.65 - r.agg*0.35;
+    r.launch = 0.1 + Math.random()*0.4; r.ph = Math.random()*7; r.wf = 0.6 + Math.random()*0.8;
+    if (SPLINE_TRACK){
+      const g = START_GRID[i + 1], off = g.off, u = START_U + g.du;
+      r.u = u; r.off = off; r.targetOff = off; r.x = r.z = r.targetX = undefined;
+      const c = sampleAt(u);
+      r.mesh.position.set(c.x + c.side.x*off, IS_CITY ? CITY_STREET_Y : c.y, c.z + c.side.z*off);
+      r.mesh.rotation.set(0, Math.atan2(c.fwd.x, c.fwd.z), 0);
+      r.mesh.visible = true;
+    } else if (LINEAR){
+      const lx = [-4.5, 1.5, 4.5][i];
+      r.x = lx; r.z = 0; r.targetX = lx; r.u = r.off = r.targetOff = undefined;
+      r.mesh.position.set(lx, 0, 0); r.mesh.rotation.set(0, 0, 0);
+      r.mesh.visible = true;
+    } else {
+      r.mesh.visible = false;                            // free-roam: no rivals
+    }
+  });
+  boosters.forEach(b => { b.taken = false; b.g.visible = true; });   // (buildWorld already re-placed them per mode)
+  smokePool.forEach(p => { p.life = 0; p.s.visible = false; });
+  smokeAcc = 0;
+  boostT = 0; boostCount = 0;
+  raceT = FREEROAM ? 1 : -3; finished = false; advance = false; lastCnt = 99;
+  if (screechGain && AC) screechGain.gain.setTargetAtTime(0, AC.currentTime, 0.01);
+  document.getElementById('lvl').textContent =
+    FREE ? `سباق حر · ${THEME.name}` : `التحدي ${LEVEL}/${THEMES.length} · ${THEME.name}`;
+  distEl.textContent = LINEAR ? `${RACE_LEN} م` : (FREEROAM ? '' : `لفة 1/${LAPS}`);
+  posEl.textContent = FREEROAM ? '' : '1/4';
+  resultEl.style.display = 'none';
+  camera.position.set(px, 3.2, pz - 8);
+}
+// single entry point for EVERY race start/restart/theme-change/mode-switch — replaces all the reloads.
+function startRace(cfg){
+  applyCfg(cfg);                                         // recompute TRACK/THEME/mode flags from cfg + localStorage
+  try { sessionStorage.raceCfg = JSON.stringify(raceCfg); } catch {}   // so a manual browser refresh still resumes
+  const sig = worldSig();
+  if (sig !== builtSig){ buildWorld(); applyThemeLook(); builtSig = sig; }   // only rebuild if the world actually changed
+  resetRace();
+  closeMenu();
+  initAudio();
+}
+
+// initial world (replaces the old parse-time inline builds); menu overlays it on a fresh visit
+buildWorld();
+applyThemeLook();
+builtSig = worldSig();
+resetRace();
 if (!menuOpen) menuEl.style.display = 'none';
 setLobby(menuOpen);
-// pause = the menu: it freezes the race and already offers resume/restart/lobby
-document.getElementById('stopBtn').addEventListener('pointerdown', openMenu);
 
 function confetti(){
   const colors = ['#ffd23f', '#ff5252', '#4dd162', '#42a5f5', '#ab47bc', '#fff'];
