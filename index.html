@@ -217,6 +217,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const MAX = 38;            // m/s top speed (~85 mph)
 const clamp = THREE.MathUtils.clamp;
+const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));   // fold an angle to [-π, π] — keeps slip bounded across spins
 // circuit geometry (metres): road half-width, curb lip, grass verge, barrier line
 const ROAD_HALF = 7, CURB_W = 0.7, VERGE_W = 16, WALL = ROAD_HALF + 3.2;
 const OFFSETS = [-5, -1.7, 1.7, 5];         // racing-line lanes = lateral offset from centre
@@ -1119,10 +1120,18 @@ let GRID_ROW = 0, START_GRID = [];
 // player + race state — all mutable, (re)set to a fresh grid by resetRace() every race start
 let px = 0, pz = 0, heading = 0, carY = 0, playerU = START_U, playerLap = 0, prevU = START_U;
 let travel = 0, speed = 0, drifting = false, carRoll = 0;
+let rearLoad = 1, yawRate = 0, prevBrk = false, prevKtDir = 0, lastFlickT = -9;   // drift: rear-grip transient, yaw velocity, brake edge, flick detection
+// drift-feel knobs — YAW-MOMENTUM model in frame(). slip = heading - travel (how sideways the car is).
+// Rear grip RISES to a peak at BP then FALLS: below BP the car self-corrects; past BP the rear lets go and it SPINS.
+// Higher speed pushes you past BP more easily — so overdriving/flicking at speed spins out, like a real car.
+// STEER_YAW = front steering authority; REAR_GRIP = rear self-align strength; YAW_DAMP = how fast the spin bleeds;
+// CHASE_HI/LO = how fast the path follows the nose when gripped / sliding; DRIFT_KICK = e-brake impulse.
+const STEER_YAW = 3.5, REAR_GRIP = 16, BP = 0.30, YAW_BASE = 0.5, YAW_GRIP = 2.4, A_LAT = 26, DRIFT_KICK = 0.06, DRIFT_ON = 0.18;
 let camYaw = 0;                          // camera's own heading — eases toward `travel` so drifts stay smooth
 let raceT = -3, finished = false, lastCnt = 99;   // free-roam skips the start countdown (set in resetRace)
 const fmtTime = t => `${Math.floor(t/60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 window.dbg = () => ({track: TRACK, roam: FREEROAM, px: +px.toFixed(1), pz: +pz.toFixed(1), heading: +heading.toFixed(2),
+  travel: +travel.toFixed(2), slip: +wrapPi(heading - travel).toFixed(3), yawRate: +yawRate.toFixed(2),
   speed: +speed.toFixed(1), u: +playerU.toFixed(3), lap: playerLap, drifting, driftOff, boostT: +boostT.toFixed(2),
   boostCount, carsReady: !!glbTemplate, cityOcc: !!cityOcc,
   pads: {gas: input.drive, brake: input.brake, L: keys.left, R: keys.right},
@@ -1630,7 +1639,7 @@ function resetRace(){                                     // reset ALL race stat
   } else {
     px = -1.5; pz = 0; heading = 0; carY = 0;
   }
-  travel = heading; camYaw = heading; speed = 0; drifting = false; carRoll = 0;
+  travel = heading; camYaw = heading; speed = 0; drifting = false; carRoll = 0; yawRate = 0; rearLoad = 1;
   playerU = START_U; playerLap = 0; prevU = START_U;
   player.position.set(px, carY, pz); player.rotation.set(0, heading, 0);
   // rivals: reposition onto the grid + re-roll temperament (fresh race feel), or hide in free-roam
@@ -1720,7 +1729,8 @@ function frame(now){
   }
   // steering (arrow pads and keyboard share the flags; smoothed toward the target)
   const kt = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
-  keySteer += (kt - keySteer) * Math.min(1, 6*dt);
+  const steerRate = (kt !== 0 && Math.sign(kt) !== Math.sign(keySteer) && keySteer !== 0) ? 12 : 6;  // opposite lock snaps in fast so counter-steer catches land in time
+  keySteer += (kt - keySteer) * Math.min(1, steerRate*dt);
   const steer = keySteer;
 
   // race clock: countdown locks inputs, then GO
@@ -1734,11 +1744,7 @@ function frame(now){
   const drv = input.drive && raceT >= 0 && !finished;
   const brk = input.brake && raceT >= 0 && !finished;
 
-  // drift: crank the wheel hard at speed OR brake+steer — tail steps out. Ease off (or slow) to grip again.
-  const hardTurn = Math.abs(steer) > 0.7 && speed > 20;                 // committed hard turn slides on its own
-  const brakeSlide = brk && Math.abs(steer) > 0.3 && speed > 12;        // handbrake-style tighter initiation
-  if (!driftOff && (hardTurn || brakeSlide)) drifting = true;           // menu toggle gates the whole mechanic
-  if (Math.abs(steer) < 0.15 || speed < 6) drifting = false;
+  // `drifting` is no longer a switch — it's DERIVED from the slip angle in the drift block below.
 
   // longitudinal — ponytail: arcadey point-mass, no tire model (brake is a drift tool mid-slide)
   if (brk){
@@ -1756,17 +1762,60 @@ function frame(now){
   else if (speed > pMAX) speed = Math.max(pMAX, speed - 6*dt);     // boost bleeds off smoothly
   if (finished) speed = Math.max(0, speed - 12*dt);   // coast to a stop past the line
 
-  // steer>0 = right turn; facing +z the car's right is -x (right-hand traffic layout), so heading decreases
-  const sa = 0.55*steer / (1 + Math.abs(speed)*0.05) * (drifting ? 1.5 : 1);
-  heading -= (speed/2.6) * Math.tan(sa) * dt;
-  // the wheels grip along `travel`: it chases heading fast on tarmac, lazily mid-drift
-  travel += (heading - travel) * Math.min(1, (drifting ? 2.2 : 12)*dt);
-  travel = clamp(travel, heading - 0.6, heading + 0.6);   // slip cap — slides, never spins out
-  if (drifting){
-    speed *= 1 - 0.25*dt;                                 // scrubbing tires cost a little pace
-    emitSmoke(px - Math.sin(heading)*2, pz - Math.cos(heading)*2, dt);   // puffs off the rear tires
+  // ---- drift dynamics: the nose has YAW MOMENTUM; rear grip peaks then lets go, so overdriving SPINS you ----
+  // slip = angle between where the car points (heading) and where it moves (travel). steer>0 turns right => heading falls.
+  const slip = wrapPi(heading - travel), sAbs = Math.abs(slip);   // wrapped so a multi-spin can't run the number away
+
+  if (driftOff){
+    // assist ON (menu toggle): grippy go-kart — planted, can't drift or spin
+    const sa = 0.55*steer / (1 + Math.abs(speed)*0.05);
+    heading -= (speed/2.6) * Math.tan(sa) * dt;
+    travel += (heading - travel) * Math.min(1, 12*dt);
+    travel = clamp(travel, heading - 0.4, heading + 0.4);
+    yawRate = 0; drifting = false;
+  } else {
+    // e-brake stab: a brake TAP (rising edge) while turning at speed snaps the rear loose into a slide
+    if (brk && !prevBrk && Math.abs(steer) > 0.2 && speed > 14){
+      rearLoad = 0.12;
+      yawRate -= DRIFT_KICK * Math.sign(steer) * speed;   // one-shot yaw impulse in the turn direction
+    }
+    // weight-transfer flick: a quick steering REVERSAL at speed unsettles the rear (Scandinavian flick).
+    // Each fast flick knocks rear grip down; a couple in a row stack -> the tail breaks loose -> pendulum spin.
+    if (kt !== 0 && kt !== prevKtDir){
+      if (kt === -prevKtDir && speed > 20 && raceT - lastFlickT < 0.6) rearLoad *= 0.45;
+      lastFlickT = raceT; prevKtDir = kt;
+    }
+    rearLoad += (1 - rearLoad) * Math.min(1, 1.6*dt);     // rear grip recovers over ~0.6s — slow enough that quick flicks STACK
+
+    const vfac = speed / (speed + 8);                     // grip & steering fade to nothing at a standstill
+    const grip = 1 / (1 + (sAbs/BP)*(sAbs/BP));           // traction from slip: 1 planted, ->0 once slip passes BP
+    let gripEff = grip * rearLoad;                        // rearLoad = transient load an e-brake stab / flick knocks down
+    if (drv && speed > 18) gripEff *= 0.7;                // on-throttle the rear spins up -> power oversteer
+    if (brk)               gripEff *= 0.6;                // braking unloads the rear -> lock-up oversteer
+
+    // rear tire self-aligns the car toward its travel — ONLY while it grips; past BP this collapses -> spin
+    const align = REAR_GRIP * slip * gripEff * vfac;
+    const steerYaw = STEER_YAW * steer * vfac;            // front tires; steering the other way (counter-steer) catches it
+    yawRate -= (steerYaw + align) * dt;                   // steer>0 and align(slip>0) both DECREASE heading
+    // yaw damping comes mostly from rear grip: firm when planted, nearly gone in a slide — so a spin CARRIES on its own momentum
+    yawRate -= yawRate * Math.min(1, (YAW_BASE + YAW_GRIP*gripEff) * dt);
+    heading += yawRate * dt;
+
+    // the PATH redirects toward the nose, but grip caps the lateral accel — and that cap falls as ~1/speed.
+    // So at HIGH speed the path can't keep up with the nose -> slip runs past BP -> spin. Low speed keeps up -> grip.
+    // The 0.12 floor lets even a full sideways slide slowly realign (and recover) as it scrubs speed off.
+    const turnMax = (0.12 + 0.88*gripEff) * A_LAT * dt / Math.max(speed, 5);
+    const dTr = wrapPi(heading - travel);                 // chase the nose the SHORT way, so recovery works from any spin
+    travel += Math.abs(dTr) < turnMax ? dTr : Math.sign(dTr) * turnMax;
+
+    drifting = sAbs > DRIFT_ON && speed > 4;
+    if (drifting){
+      speed *= 1 - 0.5 * Math.min(sAbs, 1.2) * dt;        // going sideways scrubs speed hard; a full spin kills it
+      emitSmoke(px - Math.sin(heading)*2, pz - Math.cos(heading)*2, dt);   // puffs off the rear tires
+    }
   }
-  updateScreech(drifting, Math.abs(travel - heading), speed);   // sustained tire squeal, ramps with slip
+  prevBrk = brk;
+  updateScreech(drifting, sAbs, speed);   // sustained tire squeal, ramps with slip
   updateSmoke(dt);                                        // puffs keep rising after the slide ends
   const dx = Math.sin(travel)*speed*dt, dz = Math.cos(travel)*speed*dt;
   let playerOff = 0, trackY = 0, pr = null;
