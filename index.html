@@ -85,6 +85,7 @@
   #menu .sep{font:700 12px system-ui;color:rgba(255,255,255,.55);letter-spacing:3px;margin-top:12px}
   #maps{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:540px;padding:0 16px}
   #maps button{font:700 13px system-ui;padding:11px 15px;border-radius:10px;border:2px solid rgba(255,255,255,.3);cursor:pointer}
+  #speedSlider{width:230px;max-width:80vw;accent-color:#ffd23f;cursor:pointer}
   .btnRow{display:flex;gap:10px;margin-top:10px}
   #sndBtn,#musicBtn{font:700 12px system-ui;background:none;border:1px solid rgba(255,255,255,.35);color:#fff;
     padding:8px 16px;border-radius:9px;cursor:pointer}
@@ -193,6 +194,8 @@
     <div id="lens"></div>
     <div class="sep">&#x1F3A8; ورشة الطلاء &mdash; اختر لونًا</div>
     <div id="colors"></div>
+    <div class="sep">&#x26A1; سرعة السيارة &mdash; <span id="speedVal">×1.0</span></div>
+    <input id="speedSlider" type="range" min="1" max="3" step="0.25" value="1">
     <div class="btnRow"><button id="sndBtn"></button><button id="musicBtn"></button><button id="driftBtn"></button></div>
     <div id="buildTag">v7 · Cyberpunk car by 4d_Bob (CC BY) · Procedural City by abhayexe (Sketchfab)</div>
   </div>
@@ -271,8 +274,8 @@ let worldGroup = null, builtSig = null;    // the swappable per-world scene grou
 
 // ---------- sound: all synthesized, no audio files ----------
 let AC = null, engineSrc = null, engineFilter = null, engineGain = null;
-let muted = false, musicOff = false, driftOff = false;
-try { muted = localStorage.muted === '1'; musicOff = localStorage.musicOff === '1'; driftOff = localStorage.driftOff === '1'; } catch {}
+let muted = false, musicOff = false, driftOff = false, speedMult = 1;
+try { muted = localStorage.muted === '1'; musicOff = localStorage.musicOff === '1'; driftOff = localStorage.driftOff === '1'; speedMult = clamp(+localStorage.speedMult || 1, 1, 3); } catch {}
 function initAudio(){
   if (AC) return;
   try {
@@ -1557,6 +1560,14 @@ function toggleDrift(){
   if (driftOff) drifting = false;      // drop any active slide the instant it's switched off
   driftLabel();
 }
+const speedSlider = document.getElementById('speedSlider'), speedVal = document.getElementById('speedVal');
+const speedLabel = () => speedVal.textContent = '×' + speedMult.toFixed(2);
+speedSlider.value = speedMult; speedLabel();
+speedSlider.addEventListener('input', () => {
+  speedMult = +speedSlider.value;
+  try { localStorage.speedMult = speedMult; } catch {}
+  speedLabel();
+});
 sndBtn.addEventListener('click', toggleSound);
 musicBtn.addEventListener('click', toggleMusic);
 driftBtn.addEventListener('click', toggleDrift);
@@ -1733,14 +1744,16 @@ function frame(now){
   if (brk){
     speed = speed > 0.3 ? Math.max(0, speed - (drifting ? 5 : 24)*dt) : Math.max(-9, speed - 7*dt);
   }
-  const maxNow = boostT > 0 ? BOOST_MAX : MAX;
+  const spd = speedMult;                                // lobby speed slider scales the player's top speed only
+  const pMAX = MAX*spd, pBOOST = BOOST_MAX*spd;
+  const maxNow = boostT > 0 ? pBOOST : pMAX;
   if (drv) speed = Math.min(maxNow, speed + (speed < 0 ? 18 : 11*(1 - speed/(maxNow+2)))*dt);
   if (!drv && !brk){
     const dec = (1.5 + Math.abs(speed)*0.35)*dt;
     speed = Math.abs(speed) <= dec ? 0 : speed - Math.sign(speed)*dec;
   }
-  if (boostT > 0) speed = Math.min(BOOST_MAX, speed + 20*dt);    // the ring shoves you, throttle or not
-  else if (speed > MAX) speed = Math.max(MAX, speed - 6*dt);     // boost bleeds off smoothly
+  if (boostT > 0) speed = Math.min(pBOOST, speed + 20*dt);    // the ring shoves you, throttle or not
+  else if (speed > pMAX) speed = Math.max(pMAX, speed - 6*dt);     // boost bleeds off smoothly
   if (finished) speed = Math.max(0, speed - 12*dt);   // coast to a stop past the line
 
   // steer>0 = right turn; facing +z the car's right is -x (right-hand traffic layout), so heading decreases
