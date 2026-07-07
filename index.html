@@ -107,6 +107,16 @@
   .confetti{position:absolute;top:-20px;width:10px;height:14px;pointer-events:none;animation:fall 3s linear forwards}
   @keyframes fall{to{transform:translateY(110vh) rotate(720deg)}}
 
+  /* launch loading screen — covers everything until the car + 5MB city GLBs are decoded & resident */
+  #loading{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:22px;background:linear-gradient(180deg,#0b0f1e,#1a1030);color:#fff;transition:opacity .5s ease}
+  #loading.hidden{opacity:0;pointer-events:none}
+  #loading h1{margin:0;font:900 46px system-ui;color:#ffd23f;letter-spacing:3px;text-shadow:0 4px 14px rgba(0,0,0,.7)}
+  #spinner{width:54px;height:54px;border-radius:50%;border:5px solid rgba(255,255,255,.16);border-top-color:#ffd23f;
+    animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #loadPct{font:700 14px system-ui;color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums}
+
   /* notched phones: keep controls inside the safe area */
   @supports (padding: env(safe-area-inset-top)){
     #topLeft{top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
@@ -144,6 +154,7 @@
 </style>
 </head>
 <body>
+<div id="loading"><h1>لعبة ناصر</h1><div id="spinner"></div><div id="loadPct">جارٍ التحميل…</div></div>
 <div id="hud">
   <div id="topLeft">
     <div class="hudBtn ctl active" id="camBtn"><b>&#x1F3CE;</b><span id="camLabel">خلف</span></div>
@@ -399,6 +410,15 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 document.body.appendChild(renderer.domElement);
+
+// launch loading screen: preload the heavy GLBs (car + 5 MB city) up front so no race ever waits on a
+// decode. The spinner stays until BOTH are resident; each callback (success OR error) flips its flag, and
+// a hard cap guarantees the launch can never brick on a hung decode.
+const loadingEl = document.getElementById('loading');
+const loadPct = document.getElementById('loadPct');
+let carDone = false, cityDone = false;
+function assetDone(){ if (carDone && cityDone) loadingEl.classList.add('hidden'); }
+setTimeout(() => loadingEl.classList.add('hidden'), 20000);   // ponytail: 20 s hard cap, never brick on a hang
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(THEME.sky);
@@ -957,7 +977,9 @@ function ensureCity(){
     cityOcc = {occ: filled, res, ox, oz, nx, nz};
     cityModel = city;
     if (IS_CITY) scene.add(city);   // only show it if a fast mode-switch didn't leave city while we decoded
-  }, undefined, e => { cityLoading = false; console.error('city model load failed', e); });
+    cityDone = true; assetDone();
+  }, e => { if (loadPct && e.total) loadPct.textContent = e.loaded >= e.total ? 'جارٍ تجهيز المدينة…' : `تحميل المدينة… ${Math.round(e.loaded/e.total*100)}%`; },
+     e => { cityDone = true; assetDone(); cityLoading = false; console.error('city model load failed', e); });
 }
 
 // ---------- cars: one cyberpunk GLB for every car on the grid ----------
@@ -1073,7 +1095,8 @@ gltfLoader.load('cyberpunk_car.glb', gltf => {
   }
   glbTemplate = car;
   pendingGlb.splice(0).forEach(g => dressCar(g, g.userData.tint));
-}, undefined, e => console.error('car load failed', e));
+  carDone = true; assetDone();
+}, undefined, e => { carDone = true; assetDone(); console.error('car load failed', e); });
 
 const player = new THREE.Group();
 scene.add(player);
@@ -1652,6 +1675,7 @@ builtSig = worldSig();
 resetRace();
 if (!menuOpen) menuEl.style.display = 'none';
 setLobby(menuOpen);
+ensureCity();   // preload the 5 MB city at launch (behind the spinner) so the first city race is instant too
 
 function confetti(){
   const colors = ['#ffd23f', '#ff5252', '#4dd162', '#42a5f5', '#ab47bc', '#fff'];
