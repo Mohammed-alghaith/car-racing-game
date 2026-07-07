@@ -19,44 +19,53 @@
   #hud{position:fixed;inset:0;pointer-events:none}
   #hud .ctl{pointer-events:auto;touch-action:none}
 
-  #camBtns{position:absolute;top:14px;left:14px;display:flex;gap:10px;flex-wrap:wrap;width:132px}
-  .camBtn{width:56px;height:56px;border-radius:50%;background:rgba(15,15,18,.75);border:2px solid #e8e8e8;
-    color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
-  .camBtn b{font-size:16px;line-height:1}
-  .camBtn span{font-size:9px;letter-spacing:0;margin-top:2px}
-  .camBtn.active{background:#2d6cdf;border-color:#fff}
-  .camBtn.off{opacity:.4}
+  /* system buttons (camera / pause): rounded-square panels — distinct from the round drive controls */
+  #topLeft{position:absolute;top:14px;left:14px;display:flex;gap:10px}
+  .hudBtn{width:52px;height:52px;border-radius:15px;color:#fff;cursor:pointer;
+    background:radial-gradient(circle at 35% 28%,#3a4150,#1b1e26);border:1px solid rgba(255,255,255,.22);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.5)}
+  .hudBtn b{font-size:18px;line-height:1}
+  .hudBtn span{font-size:9px;margin-top:2px;opacity:.85}
+  .hudBtn.active{border-color:#2d6cdf;box-shadow:0 0 12px rgba(45,108,223,.55)}
 
-  .pad{position:absolute;display:flex;gap:14px;z-index:2}
-  #padL{left:14px;bottom:28px;flex-direction:column}
-  #padR{right:14px;bottom:28px;flex-direction:row}
-  .arw{width:70px;height:70px;border-radius:50%;color:#fff;font-size:24px;
+  .pad{position:absolute;display:flex;gap:18px;z-index:2}
+  #padL{left:24px;bottom:30px;flex-direction:column}
+  #padR{right:24px;bottom:30px;flex-direction:row}
+  .arw{width:76px;height:76px;border-radius:50%;color:#fff;font-size:26px;
     background:radial-gradient(circle at 35% 30%,#5a6070,#23262e);border:2px solid rgba(255,255,255,.45);
     display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.55);
     user-select:none;-webkit-user-select:none}
   .arw.held{background:radial-gradient(circle at 35% 30%,#7a86a0,#3a4050);border-color:#fff;transform:scale(.94)}
 
-  #speedBox{position:absolute;left:104px;bottom:18px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
-  #bars{display:flex;flex-direction:column-reverse;gap:3px}
-  .bar{width:30px;height:8px;border-radius:2px;background:rgba(10,25,10,.55)}
+  /* speedometer + nitro grouped bottom-centre — the prominent readout, clear of the corner thumb controls */
+  #centerHud{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:flex-end;gap:14px;z-index:2}
+  #speedBox{display:flex;flex-direction:column;align-items:center;gap:5px}
+  #bars{display:flex;gap:3px}
+  .bar{width:8px;height:14px;border-radius:2px;background:rgba(255,255,255,.15)}
   .bar.on{background:#39e14e;box-shadow:0 0 7px #39e14e}
   #bars.boost .bar.on{background:#ff8a2a;box-shadow:0 0 8px #ff8a2a}
-  #mph{font:700 14px system-ui;color:#fff;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:7px}
+  #speedRead{display:flex;align-items:baseline;gap:5px;background:rgba(0,0,0,.55);padding:3px 13px;border-radius:11px}
+  #mph{font:900 24px/1 system-ui;color:#fff;font-variant-numeric:tabular-nums}
+  #unit{font:700 11px system-ui;color:rgba(255,255,255,.7)}
 
   #hint{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);
     font:11px system-ui;color:rgba(255,255,255,.75);background:rgba(0,0,0,.35);padding:3px 10px;border-radius:8px}
 
-  #boostBtn{position:absolute;right:14px;bottom:116px;width:64px;height:64px;border-radius:50%;
+  #boostBtn{position:relative;width:60px;height:60px;border-radius:50%;
     background:radial-gradient(circle at 35% 30%,#6b1a1a,#2c0b0b);border:2px solid #77302a;
-    display:flex;align-items:center;justify-content:center;font-size:26px;opacity:.45}
+    display:flex;align-items:center;justify-content:center;font-size:26px;opacity:.5}
   #boostBtn.ready{opacity:1;border-color:#ff8a2a;box-shadow:0 0 16px rgba(255,130,40,.75);cursor:pointer}
   #boostCount{position:absolute;top:-5px;right:-3px;background:#ff8a2a;color:#1a0d00;
     font:800 12px/1 system-ui;padding:3px 7px;border-radius:10px}
 
-  #raceHud{position:absolute;top:12px;left:50%;transform:translateX(-50%);text-align:center}
-  #pos{font:800 20px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);padding:6px 14px;border-radius:10px;display:inline-block}
-  #dist,#lvl{font:700 12px system-ui;color:#fff;background:rgba(0,0,0,.45);padding:2px 8px;border-radius:7px;margin-top:5px;display:inline-block}
-  #lvl{color:#ffd23f}
+  /* lap + challenge top-centre; race position top-right (leaderboard corner) */
+  #topCenter{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px}
+  #dist{font:800 16px/1 system-ui;color:#fff;background:rgba(0,0,0,.55);padding:5px 15px;border-radius:10px}
+  #lvl{font:700 11px system-ui;color:#ffd23f;background:rgba(0,0,0,.4);padding:2px 10px;border-radius:8px}
+  #posHud{position:absolute;top:14px;right:14px;display:flex;flex-direction:column;align-items:center;
+    background:linear-gradient(180deg,rgba(0,0,0,.62),rgba(0,0,0,.42));padding:5px 15px;border-radius:12px;border:1px solid rgba(255,255,255,.12)}
+  .posCap{font:700 9px system-ui;color:rgba(255,255,255,.6);letter-spacing:1px}
+  #pos{font:900 22px/1 system-ui;color:#fff}
   #banner{position:absolute;top:26%;left:50%;transform:translate(-50%,-50%);font:900 clamp(44px,11vw,90px)/1.15 system-ui;
     color:#ffd23f;text-shadow:0 5px 14px rgba(0,0,0,.65);display:none;pointer-events:none;white-space:nowrap}
   #result{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;
@@ -100,28 +109,29 @@
 
   /* notched phones: keep controls inside the safe area */
   @supports (padding: env(safe-area-inset-top)){
-    #camBtns{top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
-    #speedBox{bottom:calc(18px + env(safe-area-inset-bottom));left:calc(104px + env(safe-area-inset-left))}
-    #padL{bottom:calc(28px + env(safe-area-inset-bottom));left:calc(14px + env(safe-area-inset-left))}
-    #padR{bottom:calc(28px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right))}
-    #boostBtn{bottom:calc(116px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right))}
+    #topLeft{top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
+    #posHud{top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right))}
+    #topCenter{top:calc(12px + env(safe-area-inset-top))}
+    #centerHud{bottom:calc(16px + env(safe-area-inset-bottom))}
+    #padL{bottom:calc(30px + env(safe-area-inset-bottom));left:calc(24px + env(safe-area-inset-left))}
+    #padR{bottom:calc(30px + env(safe-area-inset-bottom));right:calc(24px + env(safe-area-inset-right))}
     #hint{bottom:calc(6px + env(safe-area-inset-bottom))}
     #menu{padding:calc(24px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom))}
   }
   /* small screens: compact controls, scrollable menu */
   @media (max-width: 480px), (max-height: 520px){
-    .camBtn{width:46px;height:46px}
-    .camBtn b{font-size:13px}
-    .camBtn span{font-size:8px}
-    #camBtns{width:114px;gap:8px}
-    .arw{width:56px;height:56px;font-size:19px}
-    #padL{left:10px;bottom:24px;gap:11px}
-    #padR{right:10px;bottom:24px;gap:11px}
-    #speedBox{left:78px}
-    #boostBtn{width:54px;height:54px;font-size:21px;right:12px;bottom:96px}
-    .bar{width:22px;height:6px}
-    #mph{font-size:12px}
-    #pos{font-size:16px}
+    .hudBtn{width:46px;height:46px;border-radius:13px}
+    .hudBtn b{font-size:15px}
+    .hudBtn span{font-size:8px}
+    .arw{width:72px;height:72px;font-size:25px}
+    #padL{left:calc(22px + env(safe-area-inset-left));bottom:calc(28px + env(safe-area-inset-bottom));gap:16px}
+    #padR{right:calc(22px + env(safe-area-inset-right));bottom:calc(28px + env(safe-area-inset-bottom));gap:16px}
+    #centerHud{bottom:calc(12px + env(safe-area-inset-bottom));gap:10px}
+    #boostBtn{width:52px;height:52px;font-size:22px}
+    .bar{width:7px;height:12px}
+    #mph{font-size:21px}
+    #pos{font-size:19px}
+    #dist{font-size:14px}
     #menu{overflow-y:auto;justify-content:flex-start;gap:14px}
     #menu h1{font-size:32px;margin:0}
     #menu .big{font-size:14px;padding:11px 20px}
@@ -135,22 +145,22 @@
 </head>
 <body>
 <div id="hud">
-  <div id="camBtns">
-    <div class="camBtn ctl active" data-mode="rear"><b>&#x1F3CE;</b><span>خلف</span></div>
-    <div class="camBtn ctl" data-mode="front"><b>&#x1F441;</b><span>أمام</span></div>
-    <div class="camBtn ctl" id="stopBtn"><b>&#x23F8;</b><span>إيقاف</span></div>
-    <div class="camBtn ctl" id="sndBtn2"><b>&#x1F50A;</b><span>الصوت</span></div>
-    <div class="camBtn ctl" id="musicBtn2"><b>&#x1F3B5;</b><span>الموسيقى</span></div>
+  <div id="topLeft">
+    <div class="hudBtn ctl active" id="camBtn"><b>&#x1F3CE;</b><span id="camLabel">خلف</span></div>
+    <div class="hudBtn ctl" id="stopBtn"><b>&#x23F8;</b><span>إيقاف</span></div>
   </div>
+  <div id="topCenter"><div id="dist">لفة 1/3</div><div id="lvl"></div></div>
+  <div id="posHud"><span class="posCap">المركز</span><span id="pos">1/4</span></div>
   <div id="padL" class="pad"><div class="arw ctl" id="btnGas">&#x25B2;</div><div class="arw ctl" id="btnBrake">&#x25BC;</div></div>
   <div id="padR" class="pad"><div class="arw ctl" id="btnL">&#x25C0;</div><div class="arw ctl" id="btnR">&#x25B6;</div></div>
-  <div id="speedBox">
-    <div id="bars"></div>
-    <div id="mph">0 كم/س</div>
+  <div id="centerHud">
+    <div id="speedBox">
+      <div id="bars"></div>
+      <div id="speedRead"><b id="mph">0</b><span id="unit">كم/س</span></div>
+    </div>
+    <div id="boostBtn" class="ctl"><b>&#x1F525;</b><span id="boostCount">0</span></div>
   </div>
   <div id="hint">اليسار: &#x25B2; غاز &#x25BC; فرامل — اليمين: &#x25C0; &#x25B6; توجيه &nbsp;|&nbsp; انعطاف قوي بسرعة = انزلاق &nbsp;|&nbsp; لوحة المفاتيح: W/S وA/D وB للتسريع</div>
-  <div id="boostBtn" class="ctl"><b>&#x1F525;</b><span id="boostCount">0</span></div>
-  <div id="raceHud"><div id="pos">1/4</div><br><div id="dist">1500 م</div><br><div id="lvl"></div></div>
   <div id="banner">3</div>
   <div id="result"><h1 id="resultText"></h1><button id="restart" class="ctl">إعادة</button><button id="menuBtn2" class="ctl">القائمة</button></div>
 </div>
@@ -1308,10 +1318,15 @@ holdPad('btnBrake', () => input.brake = true,  () => input.brake = false);
 holdPad('btnL',     () => keys.left  = true,   () => keys.left  = false);
 holdPad('btnR',     () => keys.right = true,   () => keys.right = false);
 
-document.querySelectorAll('.camBtn[data-mode]').forEach(b => b.addEventListener('pointerdown', () => {
-  camMode = b.dataset.mode;
-  document.querySelectorAll('.camBtn[data-mode]').forEach(x => x.classList.toggle('active', x === b));
-}));
+// one camera button toggles rear (chase) <-> front (cockpit); label + icon show the current view
+const camBtn = document.getElementById('camBtn');
+function setCam(mode){
+  camMode = mode;
+  camBtn.classList.toggle('active', mode === 'rear');
+  camBtn.querySelector('b').textContent = mode === 'rear' ? '\u{1F3CE}' : '\u{1F441}';
+  document.getElementById('camLabel').textContent = mode === 'rear' ? 'خلف' : 'أمام';
+}
+camBtn.addEventListener('pointerdown', () => setCam(camMode === 'rear' ? 'front' : 'rear'));
 
 const lower = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;  // CapsLock/Shift-proof
 addEventListener('keydown', e => {
@@ -1321,10 +1336,7 @@ addEventListener('keydown', e => {
   if (k === 'a' || k === 'ArrowLeft') keys.left = true;
   if (k === 'd' || k === 'ArrowRight') keys.right = true;
   if (k === 'b' && !e.repeat) fireBoost();
-  if (k === 'c' && !e.repeat) {
-    camMode = camMode === 'rear' ? 'front' : 'rear';
-    document.querySelectorAll('.camBtn[data-mode]').forEach(x => x.classList.toggle('active', x.dataset.mode === camMode));
-  }
+  if (k === 'c' && !e.repeat) setCam(camMode === 'rear' ? 'front' : 'rear');
 });
 addEventListener('keyup', e => {
   const k = lower(e);
@@ -1506,14 +1518,7 @@ const sndLabel = () => sndBtn.textContent = muted ? '\u{1F507} الصوت متو
 sndLabel();
 const musicBtn = document.getElementById('musicBtn');
 const musicLabel = () => musicBtn.textContent = musicOff ? '\u{1F3B5} الموسيقى متوقفة' : '\u{1F3B5} الموسيقى تعمل';
-const sndBtn2 = document.getElementById('sndBtn2');
-const musicBtn2 = document.getElementById('musicBtn2');
-function syncAudioUI(){
-  sndLabel(); musicLabel();
-  sndBtn2.classList.toggle('off', muted);
-  sndBtn2.querySelector('b').textContent = muted ? '\u{1F507}' : '\u{1F50A}';
-  musicBtn2.classList.toggle('off', musicOff);
-}
+function syncAudioUI(){ sndLabel(); musicLabel(); }   // sound/music quick-toggles now live only in the pause menu
 function toggleSound(){
   muted = !muted;
   try { localStorage.muted = muted ? '1' : '0'; } catch {}
@@ -1540,8 +1545,6 @@ function toggleDrift(){
 sndBtn.addEventListener('click', toggleSound);
 musicBtn.addEventListener('click', toggleMusic);
 driftBtn.addEventListener('click', toggleDrift);
-sndBtn2.addEventListener('pointerdown', toggleSound);
-musicBtn2.addEventListener('pointerdown', toggleMusic);
 syncAudioUI();
 // workshop mode: hide the race HUD and the rivals so your car has the floor
 const hudEl = document.getElementById('hud');
@@ -1960,7 +1963,7 @@ function frame(now){
 
   // HUD
   const kmh = Math.round(Math.abs(speed)*3.6);
-  mphEl.textContent = `${kmh} كم/س`;
+  mphEl.textContent = kmh;   // unit label is a static span beside the number now
   const lit = Math.round(Math.abs(speed)/MAX*10);
   bars.forEach((b, i) => b.classList.toggle('on', i < lit));
   barsEl.classList.toggle('boost', boostT > 0);
