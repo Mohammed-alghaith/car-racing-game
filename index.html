@@ -1676,7 +1676,8 @@ function resetRace(){                                     // reset ALL race stat
   document.getElementById('lvl').textContent =
     FREE ? `سباق حر · ${THEME.name}` : `التحدي ${LEVEL}/${THEMES.length} · ${THEME.name}`;
   distEl.textContent = LINEAR ? `${RACE_LEN} م` : (FREEROAM ? '' : `لفة 1/${LAPS}`);
-  posEl.textContent = FREEROAM ? '' : '1/4';
+  document.getElementById('posHud').style.display = FREEROAM ? 'none' : 'flex';   // no race in free-roam -> hide the whole rank readout, caption and all
+  posEl.textContent = '1/4';
   resultEl.style.display = 'none';
   camera.position.set(px, 3.2, pz - 8);
 }
