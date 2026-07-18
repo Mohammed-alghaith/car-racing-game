@@ -1,5 +1,5 @@
 // لعبة ناصر — offline cache
-const CACHE = 'nasser-v9';
+const CACHE = 'nasser-v10';
 const ASSETS = [
   './',
   './index.html',

@@ -1770,30 +1770,36 @@ function frame(now){
   const slip = wrapPi(heading - travel), sAbs = Math.abs(slip);   // wrapped so a multi-spin can't run the number away
 
   if (driftOff){
-    // assist ON (menu toggle): grippy go-kart — planted, can't drift or spin
-    const sa = 0.55*steer / (1 + Math.abs(speed)*0.05);
+    // assist ON (menu toggle): grippy go-kart — planted, can't drift or spin. Same /spd knee and ×spd
+    // chase as the drift branch, else easy mode understeers at high slider while expert mode doesn't.
+    const sa = 0.55*steer / (1 + Math.abs(speed)*0.05/spd);
     heading -= (speed/2.6) * Math.tan(sa) * dt;
-    travel += (heading - travel) * Math.min(1, 12*dt);
+    travel += (heading - travel) * Math.min(1, 12*spd*dt);
     travel = clamp(travel, heading - 0.4, heading + 0.4);
     yawRate = 0; drifting = false;
   } else {
+    // ALL rates below scale with the lobby slider (spd; torques by spd²) so ×2 at 250 km/h drifts like
+    // ×1 at 125 — same entry, arc, and catch, just faster through the world. Unscaled, the spd²-grippier
+    // tires out-muscled the fixed-rate drift dynamics and high speed felt glued to the road.
+    // ponytail: longitudinal (throttle/drag/brake) stays absolute, so slides carry a bit deeper at high
+    // slider — the forgiving direction; scaling accel ×spd² would upend the slider's whole feel.
     // e-brake stab: a brake TAP (rising edge) while turning at speed snaps the rear loose into a slide
     if (brk && !prevBrk && Math.abs(steer) > 0.2 && speed > 14){
       rearLoad = 0.12;
-      yawRate -= DRIFT_KICK * Math.sign(steer) * Math.min(speed, MAX);   // one-shot yaw impulse in the turn direction; capped at base MAX — uncapped, the ×3 slider makes every tap an uncatchable spin
+      yawRate -= DRIFT_KICK * Math.sign(steer) * Math.min(speed, pMAX);   // impulse ∝ speed, capped at the SCALED top speed (base-MAX cap muted it at high slider)
     }
     // weight-transfer flick: a quick steering REVERSAL at speed unsettles the rear (Scandinavian flick).
     // Each fast flick knocks rear grip down; a couple in a row stack -> the tail breaks loose -> pendulum spin.
     if (kt !== 0 && kt !== prevKtDir){
       if (kt === -prevKtDir && speed > 20 && raceT - lastFlickT < 0.6){
         rearLoad *= 0.45;
-        yawRate -= DRIFT_KICK*0.7 * kt * Math.min(speed, MAX);   // pendulum whip into the new direction — flick-and-HOLD spins, rhythm steering stays planted; same MAX cap as the e-brake kick
+        yawRate -= DRIFT_KICK*0.7 * kt * Math.min(speed, pMAX);   // pendulum whip into the new direction — flick-and-HOLD spins, rhythm steering stays planted
       }
       lastFlickT = raceT; prevKtDir = kt;
     }
-    rearLoad += (1 - rearLoad) * Math.min(1, 1.6*dt);     // rear grip recovers over ~0.6s — slow enough that quick flicks STACK
+    rearLoad += (1 - rearLoad) * Math.min(1, 1.6*spd*dt); // rear grip recovers over ~0.6s (scaled time) — slow enough that quick flicks STACK
 
-    const vfac = Math.abs(speed) / (Math.abs(speed) + 8); // grip & steering fade to nothing at a standstill; abs so reverse mirrors forward (signed speed blew up near -8 -> fan-spin)
+    const vfac = Math.abs(speed) / (Math.abs(speed) + 8*spd); // grip & steering fade to nothing at a standstill; abs so reverse mirrors forward (signed speed blew up near -8 -> fan-spin)
     const grip = 1 / (1 + (sAbs/BP)*(sAbs/BP));           // traction from slip: 1 planted, ->0 once slip passes BP
     let gripEff = grip * rearLoad;                        // rearLoad = transient load an e-brake stab / flick knocks down
     if (drv && speed > 18) gripEff *= 0.7;                // on-throttle the rear spins up -> power oversteer
@@ -1802,17 +1808,21 @@ function frame(now){
     // gripped: nose tracks the kinematic steer rate (assist-mode law) — instant turn-in. Capped at 0.92× of
     // what the tires can bend the path, so steering alone can't out-run grip; sliding (gripEff→0) turns this off.
     const aLat = A_LAT * spd*spd;                         // lateral grip scales with the lobby speed slider — ×3 speed needs ~×9 grip for the same corners
-    const sa = 0.55*steer / (1 + Math.abs(speed)*0.05);
-    const capR = 0.92 * (0.12 + 0.88*gripEff) * aLat / Math.max(Math.abs(speed), 5);
+    const sa = 0.55*steer / (1 + Math.abs(speed)*0.05/spd);
+    // overdrive: ON THROTTLE past ~60% of top speed the nose outruns what the path can follow, so a hard
+    // turn on the gas steps the tail out (the hint's "انعطاف قوي بسرعة = انزلاق") and flat-out full lock
+    // eventually spins; LIFTING drops the ratio back under 1 and the car re-grips. Relative speed ⇒ slider-invariant.
+    const push = drv ? Math.min(0.45, Math.max(0, speed/pMAX - 0.6)) : 0;
+    const capR = (0.92 + 1.5*push) * (0.12 + 0.88*gripEff) * aLat / Math.max(Math.abs(speed), 5);
     const kinR = clamp(-(speed/2.6) * Math.tan(sa), -capR, capR);
-    yawRate += (kinR - yawRate) * Math.min(1, KIN * gripEff * vfac * dt);
+    yawRate += (kinR - yawRate) * Math.min(1, KIN*spd * gripEff * vfac * dt);
 
     // rear tire self-aligns the car toward its travel — ONLY while it grips; past BP this collapses -> spin
-    const align = REAR_GRIP * slip * gripEff * vfac;
-    const steerYaw = STEER_YAW * steer * vfac * (1 - gripEff);   // in-slide front-tire authority (counter-steer); gripped steering is the kin tracking above — ungated this stacks past the cap and slow-spins at top speed
+    const align = REAR_GRIP*spd*spd * slip * gripEff * vfac;
+    const steerYaw = STEER_YAW*spd*spd * steer * vfac * (1 - gripEff);   // in-slide front-tire authority (counter-steer); gripped steering is the kin tracking above — ungated this stacks past the cap and slow-spins at top speed
     yawRate -= (steerYaw + align) * dt;                   // steer>0 and align(slip>0) both DECREASE heading
     // yaw damping comes mostly from rear grip: firm when planted, nearly gone in a slide — so a spin CARRIES on its own momentum
-    yawRate -= yawRate * Math.min(1, (YAW_BASE + YAW_GRIP*gripEff) * dt);
+    yawRate -= yawRate * Math.min(1, (YAW_BASE + YAW_GRIP*gripEff) * spd * dt);
     heading += yawRate * dt;
 
     // the PATH redirects toward the nose, but grip caps the lateral accel — and that cap falls as ~1/speed.
@@ -1824,7 +1834,7 @@ function frame(now){
 
     drifting = sAbs > DRIFT_ON && speed > 4;
     if (drifting){
-      speed *= 1 - 0.5 * Math.min(sAbs, 1.2) * dt;        // going sideways scrubs speed hard; a full spin kills it
+      speed *= 1 - 0.5*spd * Math.min(sAbs, 1.2) * dt;    // going sideways scrubs speed hard; a full spin kills it (scaled so the slide covers the same road at any slider)
       emitSmoke(px - Math.sin(heading)*2, pz - Math.cos(heading)*2, dt);   // puffs off the rear tires
     }
   }
